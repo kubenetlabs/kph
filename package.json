@@ -19,6 +19,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@heroicons/react": "^2.1.0",
     "@prisma/client": "^5.10.0",
     "@t3-oss/env-nextjs": "^0.9.0",
