@@ -1,0 +1,392 @@
+// Kubernetes Policy Hub - Database Schema
+// This schema defines the core data models for the Policy Hub SaaS platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & MULTI-TENANCY
+// ============================================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  users       User[]
+  clusters    Cluster[]
+  policies    Policy[]
+  simulations Simulation[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  image          String?
+  role           UserRole  @default(VIEWER)
+  emailVerified  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // NextAuth relationships
+  accounts Account[]
+  sessions Session[]
+
+  // Activity tracking
+  policiesCreated  Policy[]     @relation("PolicyCreator")
+  simulationsRun   Simulation[] @relation("SimulationRunner")
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN    // Full access, can manage users and clusters
+  OPERATOR // Can create/edit policies, run simulations
+  VIEWER   // Read-only access to dashboards
+}
+
+// NextAuth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// KUBERNETES CLUSTERS
+// ============================================================================
+
+model Cluster {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  provider    CloudProvider
+  region      String
+  environment Environment   @default(DEVELOPMENT)
+  status      ClusterStatus @default(PENDING)
+
+  // Connection details (encrypted in production)
+  endpoint    String // Kubernetes API server URL
+  caCert      String?  @db.Text // Base64 encoded CA certificate
+  authMethod  AuthMethod @default(TOKEN)
+  authToken   String?  @db.Text // Service account token (encrypted)
+  
+  // Operator status
+  operatorInstalled Boolean   @default(false)
+  operatorVersion   String?
+  lastHeartbeat     DateTime?
+
+  // Metadata
+  kubernetesVersion String?
+  nodeCount         Int?
+  namespaceCount    Int?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Relationships
+  policies    Policy[]
+  flowRecords FlowRecord[]
+  simulations Simulation[]
+
+  @@unique([organizationId, name])
+  @@map("clusters")
+}
+
+enum CloudProvider {
+  AWS
+  GCP
+  AZURE
+  ON_PREM
+  OTHER
+}
+
+enum Environment {
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+  TESTING
+}
+
+enum ClusterStatus {
+  PENDING     // Just added, not yet connected
+  CONNECTED   // Successfully connected
+  DEGRADED    // Connected but with issues
+  DISCONNECTED // Lost connection
+  ERROR       // Connection error
+}
+
+enum AuthMethod {
+  TOKEN       // Service account token
+  CERTIFICATE // Client certificate
+  OIDC        // OpenID Connect
+  AWS_IAM     // AWS IAM authentication
+  GCP_WIF     // GCP Workload Identity
+  AZURE_AD    // Azure Active Directory
+}
+
+// ============================================================================
+// POLICIES
+// ============================================================================
+
+model Policy {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  type        PolicyType
+  status      PolicyStatus @default(DRAFT)
+  
+  // The actual policy YAML/JSON
+  content     String       @db.Text
+  
+  // AI-generated policies track their source
+  generatedFrom   String?  @db.Text // Original natural language prompt
+  generatedModel  String?            // AI model used (e.g., "claude-3-sonnet")
+  
+  // Targeting
+  targetNamespaces String[] // Empty = all namespaces
+  targetLabels     Json?    // Label selectors as JSON
+  
+  // Deployment tracking
+  deployedAt      DateTime?
+  deployedVersion Int?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Cluster association
+  clusterId String
+  cluster   Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  // Creator tracking
+  createdById String
+  createdBy   User @relation("PolicyCreator", fields: [createdById], references: [id])
+
+  // Relationships
+  versions    PolicyVersion[]
+  simulations Simulation[]
+
+  @@unique([clusterId, name])
+  @@map("policies")
+}
+
+enum PolicyType {
+  CILIUM_NETWORK     // CiliumNetworkPolicy
+  CILIUM_CLUSTERWIDE // CiliumClusterwideNetworkPolicy
+  TETRAGON           // TracingPolicy
+  GATEWAY_HTTPROUTE  // HTTPRoute
+  GATEWAY_GRPCROUTE  // GRPCRoute
+  GATEWAY_TCPROUTE   // TCPRoute
+}
+
+enum PolicyStatus {
+  DRAFT      // Not yet deployed
+  SIMULATING // Running in simulation
+  PENDING    // Queued for deployment
+  DEPLOYED   // Active in cluster
+  FAILED     // Deployment failed
+  ARCHIVED   // No longer active
+}
+
+model PolicyVersion {
+  id        String   @id @default(cuid())
+  version   Int
+  content   String   @db.Text
+  changelog String?
+  createdAt DateTime @default(now())
+
+  // Parent policy
+  policyId String
+  policy   Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, version])
+  @@map("policy_versions")
+}
+
+// ============================================================================
+// FLOW RECORDS (Traffic Data for Simulation)
+// ============================================================================
+
+model FlowRecord {
+  id        String   @id @default(cuid())
+  timestamp DateTime
+
+  // Source
+  srcNamespace String
+  srcPodName   String?
+  srcPodLabels Json?
+  srcIP        String
+  srcPort      Int?
+
+  // Destination
+  dstNamespace String
+  dstPodName   String?
+  dstPodLabels Json?
+  dstIP        String
+  dstPort      Int
+
+  // Protocol info
+  protocol   String // TCP, UDP, ICMP
+  l7Protocol String? // HTTP, gRPC, DNS, Kafka
+
+  // HTTP-specific (if l7Protocol = HTTP)
+  httpMethod String?
+  httpPath   String?
+  httpStatus Int?
+
+  // Verdict from current policy
+  verdict FlowVerdict
+  
+  // Traffic volume
+  bytesTotal   BigInt?
+  packetsTotal BigInt?
+
+  // Cluster association
+  clusterId String
+  cluster   Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  // Indexing for time-range queries
+  @@index([clusterId, timestamp])
+  @@index([srcNamespace, dstNamespace])
+  @@map("flow_records")
+}
+
+enum FlowVerdict {
+  ALLOWED
+  DENIED
+  AUDIT   // Would be denied but in audit mode
+  UNKNOWN
+}
+
+// ============================================================================
+// SIMULATIONS (Time-Travel Feature)
+// ============================================================================
+
+model Simulation {
+  id          String           @id @default(cuid())
+  name        String
+  description String?
+  status      SimulationStatus @default(PENDING)
+
+  // Time range for traffic replay
+  startTime DateTime
+  endTime   DateTime
+
+  // Results
+  flowsAnalyzed   Int?
+  flowsAllowed    Int?
+  flowsDenied     Int?
+  flowsChanged    Int? // Flows that would have different verdict
+  completedAt     DateTime?
+  
+  // Detailed results stored as JSON
+  results Json?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Associations
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clusterId String
+  cluster   Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  policyId String
+  policy   Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  runnerId String
+  runner   User @relation("SimulationRunner", fields: [runnerId], references: [id])
+
+  @@map("simulations")
+}
+
+enum SimulationStatus {
+  PENDING    // Queued
+  RUNNING    // In progress
+  COMPLETED  // Finished successfully
+  FAILED     // Error during simulation
+  CANCELLED  // User cancelled
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  
+  action    String   // e.g., "policy.created", "cluster.connected"
+  resource  String   // e.g., "Policy", "Cluster"
+  resourceId String?
+  
+  userId    String?
+  userEmail String?
+  
+  details   Json?    // Additional context
+  ipAddress String?
+
+  organizationId String
+
+  @@index([organizationId, timestamp])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}

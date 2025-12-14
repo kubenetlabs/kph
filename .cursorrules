@@ -1,0 +1,139 @@
+# Kubernetes Policy Hub
+
+## Project Overview
+SaaS platform for unified Kubernetes policy management. This is an incubation project at F5 Networks.
+
+### Key Capabilities
+1. **Intent-to-Policy AI**: Natural language → Cilium, Tetragon, Gateway API YAML
+2. **Time-Travel Simulation**: Replay 30-90 days of historical traffic against proposed policies
+3. **Multi-Cluster Visibility**: Single dashboard for all Kubernetes clusters
+4. **Unified Policy Orchestration**: One interface for network policy, runtime security, and ingress
+
+### Architecture Components
+- **Management Plane** (this app): SaaS dashboard, policy repository, simulation engine
+- **Policy Hub Operator**: In-cluster controller (deployed to customer clusters)
+- **Policy Hub DaemonSet**: eBPF traffic capture (deployed to customer nodes)
+
+## Tech Stack
+- Next.js 14 with App Router
+- TypeScript (strict mode)
+- Tailwind CSS with custom dark theme
+- tRPC for type-safe APIs
+- Prisma with PostgreSQL
+- NextAuth for authentication
+
+## Design System
+
+### Colors
+```
+Background:     #0A0E14 (near black)
+Card:           #151B24 (dark gray)
+Card Hover:     #1C2432 (lighter gray)
+Primary:        #00D4AA (teal/green - success, primary actions)
+Accent:         #6366F1 (purple - secondary accent)
+Warning:        #F59E0B (orange)
+Danger:         #EF4444 (red)
+Muted Text:     #8B949E (gray)
+Foreground:     #F0F6FC (off-white)
+Border:         #334155 (slate)
+```
+
+### Component Colors
+- Cilium components: #7C3AED (purple)
+- Tetragon components: #BE185D (pink)
+- Gateway API: #F59E0B (orange)
+- Policy Hub owned: #0EA5E9 (cyan) with glow effect
+
+### Typography
+- Headings: font-bold, tracking-tight
+- Body: text-sm or text-base
+- Muted: text-muted-foreground (gray)
+- All caps labels: text-xs uppercase tracking-wider
+
+## Code Style
+
+### General
+- Use functional components with hooks
+- Prefer server components where possible
+- Use Tailwind for all styling, no separate CSS files
+- Keep components small and focused (< 150 lines)
+- Use descriptive variable names
+
+### File Organization
+- One component per file
+- Export component as default
+- Co-locate types with components
+- Keep API logic in server components or tRPC routers
+
+### Naming Conventions
+- Components: PascalCase (ClusterCard.tsx)
+- Utilities: camelCase (formatDate.ts)
+- API routes: kebab-case folders
+- Database models: PascalCase in schema
+
+### TypeScript
+- Always define prop types
+- Use Zod for runtime validation
+- Prefer interfaces over types for objects
+- Use `as const` for literal types
+
+## Database Models
+
+### Core Entities
+- Organization (multi-tenant)
+- User (with roles: ADMIN, OPERATOR, VIEWER)
+- Cluster (Kubernetes clusters)
+- Policy (with types: CILIUM, TETRAGON, GATEWAY_API)
+- PolicyVersion (version history)
+- FlowRecord (traffic data)
+- Simulation (replay runs)
+
+### Relationships
+- Organization has many Users and Clusters
+- Cluster has many Policies and FlowRecords
+- Policy has many PolicyVersions
+- Simulation references Policy and Cluster
+
+## Common Patterns
+
+### Data Fetching
+```tsx
+// Server component with Prisma
+async function ClustersPage() {
+  const clusters = await db.cluster.findMany({
+    where: { organizationId: session.user.orgId }
+  });
+  return <ClusterList clusters={clusters} />;
+}
+```
+
+### Client Interactions
+```tsx
+// Client component with tRPC
+"use client";
+const { data, isLoading } = api.clusters.list.useQuery();
+const createMutation = api.clusters.create.useMutation();
+```
+
+### Form Handling
+```tsx
+// Use React Hook Form + Zod
+const schema = z.object({
+  name: z.string().min(1),
+  endpoint: z.string().url(),
+});
+const form = useForm({ resolver: zodResolver(schema) });
+```
+
+## Important Notes
+
+- This is a B2B enterprise product - prioritize clarity over cleverness
+- Security is critical - never expose cluster credentials in client code
+- Performance matters - use pagination for large datasets
+- Multi-tenancy is enforced at the database query level
+- All policies must be validated before saving
+
+## Feature Flags (Future)
+- AI_POLICY_GENERATION: Enable Claude API integration
+- TIME_TRAVEL_SIMULATION: Enable traffic replay
+- MULTI_CLUSTER: Enable cross-cluster views

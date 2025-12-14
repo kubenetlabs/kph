@@ -1,0 +1,229 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   BASE STYLES
+   ============================================================================ */
+
+@layer base {
+  :root {
+    --background: 210 50% 5%;
+    --foreground: 210 40% 96%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-card-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted;
+  }
+}
+
+/* ============================================================================
+   COMPONENT STYLES
+   ============================================================================ */
+
+@layer components {
+  /* Card component */
+  .card {
+    @apply bg-card rounded-lg border border-card-border p-4;
+  }
+
+  .card-hover {
+    @apply card transition-colors hover:bg-card-hover;
+  }
+
+  /* Glow effects for Policy Hub components */
+  .glow-primary {
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  }
+
+  .glow-policyhub {
+    box-shadow: 0 0 20px rgba(14, 165, 233, 0.4);
+  }
+
+  /* Status badges */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/20 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/20 text-warning;
+  }
+
+  .badge-danger {
+    @apply badge bg-danger/20 text-danger;
+  }
+
+  .badge-muted {
+    @apply badge bg-muted/20 text-muted;
+  }
+
+  .badge-accent {
+    @apply badge bg-accent/20 text-accent-light;
+  }
+
+  .badge-policyhub {
+    @apply badge bg-policyhub/20 text-policyhub;
+  }
+
+  /* Policy type badges */
+  .badge-cilium {
+    @apply badge bg-cilium/20 text-cilium;
+  }
+
+  .badge-tetragon {
+    @apply badge bg-tetragon/20 text-tetragon;
+  }
+
+  .badge-gateway {
+    @apply badge bg-gateway/20 text-gateway;
+  }
+
+  /* Labels */
+  .label {
+    @apply text-xs font-medium uppercase tracking-wider text-muted;
+  }
+
+  .label-primary {
+    @apply label text-primary;
+  }
+
+  .label-accent {
+    @apply label text-accent-light;
+  }
+
+  /* Metric displays */
+  .metric-value {
+    @apply text-4xl font-bold text-primary;
+  }
+
+  .metric-label {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .metric-detail {
+    @apply text-xs text-muted;
+  }
+
+  /* Form inputs */
+  .input {
+    @apply w-full rounded-md border border-card-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary;
+  }
+
+  .input-error {
+    @apply input border-danger focus:border-danger focus:ring-danger;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-primary-foreground hover:bg-primary-600 focus:ring-primary;
+  }
+
+  .btn-secondary {
+    @apply btn bg-card text-foreground border border-card-border hover:bg-card-hover focus:ring-accent;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger text-danger-foreground hover:bg-danger-dark focus:ring-danger;
+  }
+
+  .btn-ghost {
+    @apply btn text-muted hover:bg-card hover:text-foreground;
+  }
+
+  /* Sidebar navigation */
+  .nav-item {
+    @apply flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-card hover:text-foreground;
+  }
+
+  .nav-item-active {
+    @apply nav-item bg-card text-foreground border-l-2 border-primary;
+  }
+
+  /* YAML/Code display */
+  .code-block {
+    @apply rounded-md bg-background p-4 font-mono text-sm text-foreground overflow-x-auto border border-card-border;
+  }
+
+  /* Table styles */
+  .table-header {
+    @apply text-xs font-medium uppercase tracking-wider text-muted;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-sm text-foreground;
+  }
+
+  .table-row {
+    @apply border-b border-card-border hover:bg-card-hover transition-colors;
+  }
+}
+
+/* ============================================================================
+   UTILITY STYLES
+   ============================================================================ */
+
+@layer utilities {
+  /* Text gradient for headings */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary to-accent-light bg-clip-text text-transparent;
+  }
+
+  /* Accent bar (left border accent) */
+  .accent-bar-left {
+    @apply border-l-4 border-accent pl-4;
+  }
+
+  .accent-bar-primary {
+    @apply border-l-4 border-primary pl-4;
+  }
+
+  /* Truncate with ellipsis */
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}

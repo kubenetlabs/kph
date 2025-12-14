@@ -1,0 +1,381 @@
+"use client";
+
+import { useState } from "react";
+import AppShell from "~/components/layout/app-shell";
+import { Card } from "~/components/ui/card";
+import Button from "~/components/ui/button";
+import Badge from "~/components/ui/badge";
+import Modal from "~/components/ui/modal";
+import PolicyForm from "~/components/policies/policy-form";
+import { trpc } from "~/lib/trpc";
+
+type PolicyType =
+  | "CILIUM_NETWORK"
+  | "CILIUM_CLUSTERWIDE"
+  | "TETRAGON"
+  | "GATEWAY_HTTPROUTE"
+  | "GATEWAY_GRPCROUTE"
+  | "GATEWAY_TCPROUTE";
+
+type PolicyStatus =
+  | "DRAFT"
+  | "SIMULATING"
+  | "PENDING"
+  | "DEPLOYED"
+  | "FAILED"
+  | "ARCHIVED";
+
+const typeConfig: Record<PolicyType, { variant: "cilium" | "tetragon" | "gateway"; label: string }> = {
+  CILIUM_NETWORK: { variant: "cilium", label: "Cilium Network" },
+  CILIUM_CLUSTERWIDE: { variant: "cilium", label: "Cilium Clusterwide" },
+  TETRAGON: { variant: "tetragon", label: "Tetragon" },
+  GATEWAY_HTTPROUTE: { variant: "gateway", label: "Gateway HTTP" },
+  GATEWAY_GRPCROUTE: { variant: "gateway", label: "Gateway gRPC" },
+  GATEWAY_TCPROUTE: { variant: "gateway", label: "Gateway TCP" },
+};
+
+const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warning" | "success" | "danger"; label: string }> = {
+  DRAFT: { variant: "muted", label: "Draft" },
+  SIMULATING: { variant: "accent", label: "Simulating" },
+  PENDING: { variant: "warning", label: "Pending" },
+  DEPLOYED: { variant: "success", label: "Deployed" },
+  FAILED: { variant: "danger", label: "Failed" },
+  ARCHIVED: { variant: "muted", label: "Archived" },
+};
+
+export default function PoliciesPage() {
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [filterType, setFilterType] = useState<PolicyType | "">("");
+  const [filterStatus, setFilterStatus] = useState<PolicyStatus | "">("");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const utils = trpc.useUtils();
+
+  // Fetch policies with filters
+  const { data, isLoading, error } = trpc.policy.list.useQuery({
+    ...(filterType && { type: filterType as PolicyType }),
+    ...(filterStatus && { status: filterStatus as PolicyStatus }),
+    ...(searchQuery && { search: searchQuery }),
+  });
+
+  // Fetch stats
+  const { data: stats } = trpc.policy.getStats.useQuery();
+
+  // Create mutation
+  const createMutation = trpc.policy.create.useMutation({
+    onSuccess: () => {
+      utils.policy.list.invalidate();
+      utils.policy.getStats.invalidate();
+      setIsCreateModalOpen(false);
+    },
+  });
+
+  // Delete mutation
+  const deleteMutation = trpc.policy.delete.useMutation({
+    onSuccess: () => {
+      utils.policy.list.invalidate();
+      utils.policy.getStats.invalidate();
+    },
+  });
+
+  // Deploy mutation
+  const deployMutation = trpc.policy.deploy.useMutation({
+    onSuccess: () => {
+      utils.policy.list.invalidate();
+      utils.policy.getStats.invalidate();
+    },
+  });
+
+  // Archive mutation
+  const archiveMutation = trpc.policy.archive.useMutation({
+    onSuccess: () => {
+      utils.policy.list.invalidate();
+      utils.policy.getStats.invalidate();
+    },
+  });
+
+  const policies = data?.policies ?? [];
+
+  const handleCreatePolicy = (formData: {
+    name: string;
+    description?: string;
+    type: PolicyType;
+    clusterId: string;
+    content: string;
+    targetNamespaces: string[];
+  }) => {
+    createMutation.mutate(formData);
+  };
+
+  const handleDelete = (id: string, name: string) => {
+    if (confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
+      deleteMutation.mutate({ id });
+    }
+  };
+
+  const handleDeploy = (id: string) => {
+    deployMutation.mutate({ id });
+  };
+
+  const handleArchive = (id: string) => {
+    archiveMutation.mutate({ id });
+  };
+
+  return (
+    <AppShell>
+      {/* Page Header */}
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Policies</h1>
+          <p className="mt-1 text-muted">
+            Create and manage network, runtime, and ingress policies
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="secondary">
+            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            Generate with AI
+          </Button>
+          <Button onClick={() => setIsCreateModalOpen(true)}>
+            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Policy
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="mb-6 grid grid-cols-4 gap-4">
+        <Card className="text-center">
+          <p className="text-2xl font-bold text-foreground">{stats?.total ?? 0}</p>
+          <p className="text-sm text-muted">Total Policies</p>
+        </Card>
+        <Card className="text-center">
+          <p className="text-2xl font-bold text-success">{stats?.deployed ?? 0}</p>
+          <p className="text-sm text-muted">Deployed</p>
+        </Card>
+        <Card className="text-center">
+          <p className="text-2xl font-bold text-accent-light">{stats?.simulating ?? 0}</p>
+          <p className="text-sm text-muted">Simulating</p>
+        </Card>
+        <Card className="text-center">
+          <p className="text-2xl font-bold text-muted">{stats?.drafts ?? 0}</p>
+          <p className="text-sm text-muted">Drafts</p>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-6 flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted">Filter:</span>
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as PolicyType | "")}
+            className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">All Types</option>
+            {Object.entries(typeConfig).map(([value, { label }]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as PolicyStatus | "")}
+            className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">All Statuses</option>
+            {Object.entries(statusConfig).map(([value, { label }]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1" />
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Search policies..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-64 rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+      </div>
+
+      {/* Loading State */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="rounded-md border border-danger/30 bg-danger/10 p-4">
+          <p className="text-sm text-danger">
+            Failed to load policies: {error.message}
+          </p>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoading && !error && policies.length === 0 && (
+        <div className="rounded-lg border border-card-border bg-card p-12 text-center">
+          <svg
+            className="mx-auto h-12 w-12 text-muted"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+          <h3 className="mt-4 text-lg font-semibold text-foreground">No policies found</h3>
+          <p className="mt-2 text-sm text-muted">
+            {searchQuery || filterType || filterStatus
+              ? "Try adjusting your filters"
+              : "Get started by creating your first policy"}
+          </p>
+          {!searchQuery && !filterType && !filterStatus && (
+            <Button className="mt-4" onClick={() => setIsCreateModalOpen(true)}>
+              Create Policy
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Policies Grid */}
+      {!isLoading && !error && policies.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {policies.map((policy) => {
+            const type = typeConfig[policy.type as PolicyType];
+            const status = statusConfig[policy.status as PolicyStatus];
+
+            return (
+              <Card key={policy.id} hover className="relative">
+                {/* Type indicator */}
+                <div
+                  className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${
+                    policy.type.startsWith("CILIUM")
+                      ? "bg-cilium"
+                      : policy.type === "TETRAGON"
+                      ? "bg-tetragon"
+                      : "bg-gateway"
+                  }`}
+                />
+
+                <div className="pl-2">
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-foreground truncate">
+                        {policy.name}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted line-clamp-2">
+                        {policy.description || "No description"}
+                      </p>
+                    </div>
+                    <Badge variant={status.variant}>{status.label}</Badge>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Badge variant={type.variant}>{type.label}</Badge>
+                    {policy.targetNamespaces.length > 0 && (
+                      <Badge variant="muted">
+                        {policy.targetNamespaces.length} namespace
+                        {policy.targetNamespaces.length > 1 ? "s" : ""}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-card-border pt-3">
+                    <div className="text-xs text-muted">
+                      <span className="text-foreground">{policy.cluster.name}</span>
+                      {policy.deployedAt && (
+                        <>
+                          <span className="mx-1">•</span>
+                          <span>
+                            Deployed{" "}
+                            {new Date(policy.deployedAt).toLocaleDateString()}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      {policy.status === "DRAFT" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeploy(policy.id)}
+                          disabled={deployMutation.isPending}
+                        >
+                          Deploy
+                        </Button>
+                      )}
+                      {policy.status === "DEPLOYED" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleArchive(policy.id)}
+                          disabled={archiveMutation.isPending}
+                        >
+                          Archive
+                        </Button>
+                      )}
+                      {policy.status !== "DEPLOYED" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(policy.id, policy.name)}
+                          disabled={deleteMutation.isPending}
+                          className="text-danger hover:text-danger"
+                        >
+                          Delete
+                        </Button>
+                      )}
+                      <a href={`/policies/${policy.id}`}>
+                        <Button variant="ghost" size="sm">
+                          View →
+                        </Button>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create Policy Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Create New Policy"
+        description="Define a new network, runtime, or ingress policy"
+        size="2xl"
+      >
+        <PolicyForm
+          mode="create"
+          onSubmit={handleCreatePolicy}
+          onCancel={() => setIsCreateModalOpen(false)}
+          isLoading={createMutation.isPending}
+        />
+        {createMutation.error && (
+          <p className="mt-4 text-sm text-danger">
+            {createMutation.error.message}
+          </p>
+        )}
+      </Modal>
+    </AppShell>
+  );
+}
