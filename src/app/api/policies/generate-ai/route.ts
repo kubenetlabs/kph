@@ -109,7 +109,7 @@ Remember:
 
     // Call Claude API
     const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-haiku-20240307",
       max_tokens: 2048,
       messages: [
         {
@@ -159,7 +159,7 @@ Remember:
         content: generatedYaml,
         targetNamespaces: extractedNamespace ? [extractedNamespace] : targetNamespace ? [targetNamespace] : [],
         generatedFrom: prompt,
-        generatedModel: "claude-sonnet-4-20250514",
+        generatedModel: "claude-3-haiku-20240307",
       },
       usage: {
         inputTokens: message.usage.input_tokens,
