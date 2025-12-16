@@ -57,16 +57,17 @@ func (r *PolicyHubConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Register if not registered
+	// Register if not registered (only happens for non-bootstrap flow)
 	if !r.Reconciler.IsRegistered() {
 		if err := r.Reconciler.Register(ctx); err != nil {
 			log.Error(err, "Failed to register with SaaS platform")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
-
-		// Start background sync and heartbeat
-		r.startBackgroundTasks(ctx)
 	}
+
+	// Start background tasks if not already running
+	// This handles both fresh registration and restarts where we restored from bootstrapped state
+	r.startBackgroundTasks()
 
 	// Trigger immediate sync
 	if err := r.Reconciler.SyncPolicies(ctx); err != nil {
@@ -78,12 +79,16 @@ func (r *PolicyHubConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // startBackgroundTasks starts the sync and heartbeat goroutines
-func (r *PolicyHubConfigReconciler) startBackgroundTasks(ctx context.Context) {
+// Uses context.Background() since these tasks run for the lifetime of the operator
+func (r *PolicyHubConfigReconciler) startBackgroundTasks() {
 	if r.stopChan != nil {
 		return // Already running
 	}
 
 	r.stopChan = make(chan struct{})
+
+	// Use background context for long-running tasks
+	bgCtx := context.Background()
 
 	// Start sync ticker
 	syncInterval := r.Reconciler.GetSyncInterval()
@@ -93,7 +98,7 @@ func (r *PolicyHubConfigReconciler) startBackgroundTasks(ctx context.Context) {
 		for {
 			select {
 			case <-r.syncTicker.C:
-				if err := r.Reconciler.SyncPolicies(ctx); err != nil {
+				if err := r.Reconciler.SyncPolicies(bgCtx); err != nil {
 					r.Log.Error(err, "Background sync failed")
 				}
 			case <-r.stopChan:
@@ -109,14 +114,14 @@ func (r *PolicyHubConfigReconciler) startBackgroundTasks(ctx context.Context) {
 
 	go func() {
 		// Send initial heartbeat
-		if err := r.Reconciler.SendHeartbeat(ctx); err != nil {
+		if err := r.Reconciler.SendHeartbeat(bgCtx); err != nil {
 			r.Log.Error(err, "Initial heartbeat failed")
 		}
 
 		for {
 			select {
 			case <-r.hbTicker.C:
-				if err := r.Reconciler.SendHeartbeat(ctx); err != nil {
+				if err := r.Reconciler.SendHeartbeat(bgCtx); err != nil {
 					r.Log.Error(err, "Heartbeat failed")
 				}
 			case <-r.stopChan:

@@ -31,7 +31,7 @@ const createPolicySchema = z.object({
       /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/,
       "Policy name must start and end with alphanumeric characters and can only contain lowercase letters, numbers, and hyphens"
     ),
-  description: z.string().max(500).optional(),
+  description: z.string().max(5000).optional(),
   type: PolicyTypeSchema,
   content: z.string().min(1, "Policy content is required"),
   clusterId: z.string().min(1, "Cluster is required"),
@@ -49,7 +49,7 @@ const updatePolicySchema = z.object({
     .max(63)
     .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/)
     .optional(),
-  description: z.string().max(500).optional(),
+  description: z.string().max(5000).optional(),
   type: PolicyTypeSchema.optional(),
   status: PolicyStatusSchema.optional(),
   content: z.string().min(1).optional(),
