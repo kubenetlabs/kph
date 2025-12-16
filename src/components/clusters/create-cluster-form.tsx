@@ -152,7 +152,7 @@ export default function CreateClusterForm({
   };
 
   const selectedProvider = formData.provider as keyof typeof regionSuggestions;
-  const suggestedRegions = selectedProvider ? regionSuggestions[selectedProvider] : [];
+  const suggestedRegions = selectedProvider ? regionSuggestions[selectedProvider] ?? [] : [];
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">

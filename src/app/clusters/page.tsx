@@ -75,6 +75,23 @@ const environmentConfig = {
   TESTING: { variant: "muted" as const, label: "Testing" },
 };
 
+interface Cluster {
+  id: string;
+  name: string;
+  description: string;
+  provider: string;
+  region: string;
+  environment: string;
+  status: string;
+  kubernetesVersion: string | null;
+  nodeCount: number | null;
+  namespaceCount: number | null;
+  operatorInstalled: boolean;
+  operatorVersion: string | null;
+  lastHeartbeat: Date | null;
+  createdAt: Date;
+}
+
 interface ClusterFormData {
   name: string;
   description?: string;
@@ -87,7 +104,7 @@ interface ClusterFormData {
 export default function ClustersPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [clusters, setClusters] = useState(initialClusters);
+  const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
 
   const handleCreateCluster = async (data: ClusterFormData) => {
     setIsSubmitting(true);
@@ -96,14 +113,14 @@ export default function ClustersPage() {
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Add new cluster to the list (in real app, this would come from the API response)
-    const newCluster = {
+    const newCluster: Cluster = {
       id: String(Date.now()),
       name: data.name,
       description: data.description ?? "",
       provider: data.provider,
       region: data.region,
       environment: data.environment,
-      status: "PENDING" as const,
+      status: "PENDING",
       kubernetesVersion: null,
       nodeCount: null,
       namespaceCount: null,
