@@ -53,8 +53,8 @@ export default function PoliciesPage() {
 
   // Fetch policies with filters
   const { data, isLoading, error } = trpc.policy.list.useQuery({
-    ...(filterType && { type: filterType as PolicyType }),
-    ...(filterStatus && { status: filterStatus as PolicyStatus }),
+    ...(filterType && { type: filterType }),
+    ...(filterStatus && { status: filterStatus }),
     ...(searchQuery && { search: searchQuery }),
   });
 
@@ -64,8 +64,8 @@ export default function PoliciesPage() {
   // Create mutation
   const createMutation = trpc.policy.create.useMutation({
     onSuccess: () => {
-      utils.policy.list.invalidate();
-      utils.policy.getStats.invalidate();
+      void utils.policy.list.invalidate();
+      void utils.policy.getStats.invalidate();
       setIsCreateModalOpen(false);
     },
   });
@@ -73,24 +73,24 @@ export default function PoliciesPage() {
   // Delete mutation
   const deleteMutation = trpc.policy.delete.useMutation({
     onSuccess: () => {
-      utils.policy.list.invalidate();
-      utils.policy.getStats.invalidate();
+      void utils.policy.list.invalidate();
+      void utils.policy.getStats.invalidate();
     },
   });
 
   // Deploy mutation
   const deployMutation = trpc.policy.deploy.useMutation({
     onSuccess: () => {
-      utils.policy.list.invalidate();
-      utils.policy.getStats.invalidate();
+      void utils.policy.list.invalidate();
+      void utils.policy.getStats.invalidate();
     },
   });
 
   // Archive mutation
   const archiveMutation = trpc.policy.archive.useMutation({
     onSuccess: () => {
-      utils.policy.list.invalidate();
-      utils.policy.getStats.invalidate();
+      void utils.policy.list.invalidate();
+      void utils.policy.getStats.invalidate();
     },
   });
 
@@ -283,7 +283,7 @@ export default function PoliciesPage() {
                         {policy.name}
                       </h3>
                       <p className="mt-1 text-sm text-muted line-clamp-2">
-                        {policy.description || "No description"}
+                        {policy.description ?? "No description"}
                       </p>
                     </div>
                     <Badge variant={status.variant}>{status.label}</Badge>

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
@@ -58,7 +58,7 @@ Respond with ONLY the YAML content, starting with "apiVersion:" and nothing else
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body: unknown = await request.json();
 
     // Validate request
     const validationResult = generatePolicyRequestSchema.safeParse(body);
@@ -170,13 +170,14 @@ Remember:
     console.error("Error generating policy with Claude:", error);
 
     if (error instanceof Anthropic.APIError) {
+      const statusCode = typeof error.status === "number" ? error.status : 500;
       return NextResponse.json(
         {
           error: "Claude API error",
           message: error.message,
-          status: error.status,
+          status: statusCode,
         },
-        { status: error.status ?? 500 }
+        { status: statusCode }
       );
     }
 

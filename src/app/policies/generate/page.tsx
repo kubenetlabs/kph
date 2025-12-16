@@ -76,7 +76,7 @@ export default function GeneratePolicyPage() {
   // Save mutation
   const saveMutation = trpc.policy.create.useMutation({
     onSuccess: (data) => {
-      utils.policy.list.invalidate();
+      void utils.policy.list.invalidate();
       router.push(`/policies/${data.id}`);
     },
   });
@@ -108,10 +108,11 @@ export default function GeneratePolicyPage() {
         }),
       });
 
-      const data = await response.json();
+      const data: unknown = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message ?? data.error ?? "Failed to generate policy");
+        const errorData = data as { message?: string; error?: string };
+        throw new Error(errorData.message ?? errorData.error ?? "Failed to generate policy");
       }
 
       const result = data as GenerateResponse;
@@ -140,7 +141,7 @@ export default function GeneratePolicyPage() {
 
   const handleCopyToClipboard = () => {
     if (generatedPolicy) {
-      navigator.clipboard.writeText(generatedPolicy.content);
+      void navigator.clipboard.writeText(generatedPolicy.content);
     }
   };
 

@@ -63,8 +63,8 @@ export default function PolicyDetailPage() {
   // Update mutation
   const updateMutation = trpc.policy.update.useMutation({
     onSuccess: () => {
-      utils.policy.getById.invalidate({ id: policyId });
-      utils.policy.list.invalidate();
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.policy.list.invalidate();
       setIsEditModalOpen(false);
     },
   });
@@ -79,16 +79,16 @@ export default function PolicyDetailPage() {
   // Deploy mutation
   const deployMutation = trpc.policy.deploy.useMutation({
     onSuccess: () => {
-      utils.policy.getById.invalidate({ id: policyId });
-      utils.policy.list.invalidate();
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.policy.list.invalidate();
     },
   });
 
   // Archive mutation
   const archiveMutation = trpc.policy.archive.useMutation({
     onSuccess: () => {
-      utils.policy.getById.invalidate({ id: policyId });
-      utils.policy.list.invalidate();
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.policy.list.invalidate();
     },
   });
 
@@ -132,6 +132,7 @@ export default function PolicyDetailPage() {
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- checking truthiness, not nullish
   if (error || !policy) {
     return (
       <AppShell>
@@ -174,7 +175,7 @@ export default function PolicyDetailPage() {
               <Badge variant={status.variant}>{status.label}</Badge>
             </div>
             <p className="mt-2 text-muted">
-              {policy.description || "No description provided"}
+              {policy.description ?? "No description provided"}
             </p>
           </div>
 

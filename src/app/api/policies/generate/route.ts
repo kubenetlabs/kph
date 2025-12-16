@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 // Request validation schema
@@ -456,7 +456,7 @@ function formatAsYAML(obj: unknown, indent = 0): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body: unknown = await request.json();
 
     // Validate request
     const validationResult = generatePolicyRequestSchema.safeParse(body);

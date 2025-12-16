@@ -1,7 +1,7 @@
 import AppShell from "~/components/layout/app-shell";
 import MetricCard from "~/components/dashboard/metric-card";
 import ClusterCard from "~/components/dashboard/cluster-card";
-import { Card, CardHeader, CardTitle, CardContent } from "~/components/ui/card";
+import { Card, CardContent } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 
