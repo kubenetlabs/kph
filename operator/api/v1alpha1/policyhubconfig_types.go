@@ -13,12 +13,26 @@ type PolicyHubConfigSpec struct {
 	SaaSEndpoint string `json:"saasEndpoint"`
 
 	// ClusterID is the unique identifier for this cluster in the SaaS platform
-	// +kubebuilder:validation:Required
-	ClusterID string `json:"clusterId"`
+	// Set this if you already have a cluster created in Policy Hub (legacy mode)
+	// Leave empty to use bootstrap mode with ClusterName
+	// +optional
+	ClusterID string `json:"clusterId,omitempty"`
 
-	// APITokenSecretRef references the secret containing the API token
-	// +kubebuilder:validation:Required
-	APITokenSecretRef SecretKeySelector `json:"apiTokenSecretRef"`
+	// ClusterName is the name for this cluster when using bootstrap mode
+	// The operator will register with the SaaS and create the cluster automatically
+	// +optional
+	ClusterName string `json:"clusterName,omitempty"`
+
+	// APITokenSecretRef references the secret containing the cluster-specific API token
+	// Required if ClusterID is set (legacy mode)
+	// In bootstrap mode, this is where the token will be stored after registration
+	// +optional
+	APITokenSecretRef *SecretKeySelector `json:"apiTokenSecretRef,omitempty"`
+
+	// RegistrationTokenSecretRef references the secret containing the registration token
+	// Required for bootstrap mode (when ClusterID is not set)
+	// +optional
+	RegistrationTokenSecretRef *SecretKeySelector `json:"registrationTokenSecretRef,omitempty"`
 
 	// SyncInterval is how often to sync policies from the SaaS platform
 	// +kubebuilder:default="30s"
@@ -38,6 +52,18 @@ type PolicyHubConfigSpec struct {
 	// Empty means all namespaces
 	// +optional
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
+
+	// Provider is the cloud provider (AWS, GCP, AZURE, ON_PREM, OTHER)
+	// +optional
+	Provider string `json:"provider,omitempty"`
+
+	// Region is the cluster's region
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// Environment is the cluster's environment (DEVELOPMENT, STAGING, PRODUCTION, TESTING)
+	// +optional
+	Environment string `json:"environment,omitempty"`
 }
 
 // SecretKeySelector selects a key of a Secret
@@ -82,11 +108,20 @@ type FlowCollectionSpec struct {
 // PolicyHubConfigStatus defines the observed state of PolicyHubConfig
 type PolicyHubConfigStatus struct {
 	// Phase represents the current phase of the operator
-	// +kubebuilder:validation:Enum=Initializing;Registered;Syncing;Error
+	// +kubebuilder:validation:Enum=Initializing;Bootstrapping;Registered;Syncing;Error
 	Phase string `json:"phase,omitempty"`
 
 	// OperatorID is the unique identifier assigned during registration
 	OperatorID string `json:"operatorId,omitempty"`
+
+	// ClusterID is the cluster ID (set after bootstrap or from spec)
+	ClusterID string `json:"clusterId,omitempty"`
+
+	// ClusterName is the cluster name (from bootstrap response or spec)
+	ClusterName string `json:"clusterName,omitempty"`
+
+	// Bootstrapped indicates if the operator has completed bootstrap registration
+	Bootstrapped bool `json:"bootstrapped,omitempty"`
 
 	// LastHeartbeat is the timestamp of the last successful heartbeat
 	LastHeartbeat *metav1.Time `json:"lastHeartbeat,omitempty"`

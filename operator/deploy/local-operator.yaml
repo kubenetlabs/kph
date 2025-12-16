@@ -1,0 +1,98 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-hub-operator
+  namespace: policy-hub-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: policy-hub-operator
+rules:
+  # Core resources
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "pods", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # PolicyHub CRDs
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs", "managedpolicies"]
+    verbs: ["*"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs/status", "managedpolicies/status"]
+    verbs: ["get", "update", "patch"]
+  # Cilium CRDs
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["*"]
+  # Tetragon CRDs
+  - apiGroups: ["cilium.io"]
+    resources: ["tracingpolicies", "tracingpoliciesnamespaced"]
+    verbs: ["*"]
+  # Gateway API CRDs
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes", "grpcroutes", "tlsroutes", "tcproutes", "udproutes"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: policy-hub-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: policy-hub-operator
+subjects:
+  - kind: ServiceAccount
+    name: policy-hub-operator
+    namespace: policy-hub-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-hub-operator
+  namespace: policy-hub-system
+  labels:
+    app: policy-hub-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: policy-hub-operator
+  template:
+    metadata:
+      labels:
+        app: policy-hub-operator
+    spec:
+      serviceAccountName: policy-hub-operator
+      containers:
+        - name: operator
+          image: policy-hub-operator:local
+          imagePullPolicy: Never
+          args:
+            - --leader-elect=false
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10

@@ -52,7 +52,27 @@ func (r *Reconciler) Initialize(ctx context.Context, config *policyv1alpha1.Poli
 	r.config = config
 	r.log.Info("Initializing reconciler",
 		"saasEndpoint", config.Spec.SaaSEndpoint,
-		"clusterId", config.Spec.ClusterID)
+		"clusterId", config.Spec.ClusterID,
+		"clusterName", config.Spec.ClusterName,
+		"statusClusterId", config.Status.ClusterID,
+		"statusBootstrapped", config.Status.Bootstrapped)
+
+	// Check if bootstrap already completed (status has cluster ID from previous bootstrap)
+	if config.Status.Bootstrapped && config.Status.ClusterID != "" {
+		r.log.Info("Bootstrap already completed, using stored cluster token",
+			"clusterId", config.Status.ClusterID)
+		return r.initializeFromBootstrappedState(ctx, config)
+	}
+
+	// Check if we need to bootstrap (no clusterId but has clusterName and registrationToken)
+	if config.Spec.ClusterID == "" && config.Spec.ClusterName != "" && config.Spec.RegistrationTokenSecretRef != nil {
+		return r.bootstrap(ctx, config)
+	}
+
+	// Legacy mode: use existing cluster ID and API token
+	if config.Spec.APITokenSecretRef == nil {
+		return fmt.Errorf("apiTokenSecretRef is required when clusterId is set")
+	}
 
 	// Get API token from secret
 	apiToken, err := r.getAPIToken(ctx, config)
@@ -72,6 +92,195 @@ func (r *Reconciler) Initialize(ctx context.Context, config *policyv1alpha1.Poli
 	r.deployer = policy.NewDeployer(r.client, r.log)
 
 	return nil
+}
+
+// initializeFromBootstrappedState sets up the reconciler after bootstrap has already completed
+func (r *Reconciler) initializeFromBootstrappedState(ctx context.Context, config *policyv1alpha1.PolicyHubConfig) error {
+	// Get the cluster token that was stored during bootstrap
+	clusterToken, err := r.getClusterToken(ctx, config)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster token: %w", err)
+	}
+
+	// Create SaaS client with the stored cluster token
+	r.saasClient = saas.NewClient(
+		config.Spec.SaaSEndpoint,
+		clusterToken,
+		config.Status.ClusterID,
+		r.log,
+	)
+
+	r.operatorID = config.Status.OperatorID
+	r.registered = true
+
+	// Create policy deployer
+	r.deployer = policy.NewDeployer(r.client, r.log)
+
+	return nil
+}
+
+// getClusterToken retrieves the cluster token from the secret created during bootstrap
+func (r *Reconciler) getClusterToken(ctx context.Context, config *policyv1alpha1.PolicyHubConfig) (string, error) {
+	secret := &corev1.Secret{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      "policy-hub-cluster-token",
+		Namespace: config.Namespace,
+	}, secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to get cluster token secret: %w", err)
+	}
+
+	token, ok := secret.Data["api-token"]
+	if !ok {
+		return "", fmt.Errorf("api-token key not found in cluster token secret")
+	}
+
+	return string(token), nil
+}
+
+// bootstrap handles the self-registration flow for new clusters
+func (r *Reconciler) bootstrap(ctx context.Context, config *policyv1alpha1.PolicyHubConfig) error {
+	r.log.Info("Starting bootstrap flow", "clusterName", config.Spec.ClusterName)
+
+	// Update status to Bootstrapping
+	if err := r.updateConfigStatus(ctx, func(status *policyv1alpha1.PolicyHubConfigStatus) {
+		status.Phase = "Bootstrapping"
+		status.Message = "Bootstrapping cluster registration..."
+	}); err != nil {
+		r.log.Error(err, "Failed to update status to Bootstrapping")
+	}
+
+	// Get registration token from secret
+	registrationToken, err := r.getRegistrationToken(ctx, config)
+	if err != nil {
+		return fmt.Errorf("failed to get registration token: %w", err)
+	}
+
+	// Create bootstrap client
+	bootstrapClient := saas.NewBootstrapClient(config.Spec.SaaSEndpoint, registrationToken, r.log)
+
+	// Get cluster info
+	nodeCount, namespaceCount, k8sVersion := r.getClusterInfo(ctx)
+
+	// Call bootstrap endpoint
+	resp, err := bootstrapClient.Bootstrap(ctx, saas.BootstrapRequest{
+		ClusterName:       config.Spec.ClusterName,
+		OperatorVersion:   OperatorVersion,
+		KubernetesVersion: k8sVersion,
+		NodeCount:         nodeCount,
+		NamespaceCount:    namespaceCount,
+		Provider:          config.Spec.Provider,
+		Region:            config.Spec.Region,
+		Environment:       config.Spec.Environment,
+	})
+	if err != nil {
+		// Update status with error
+		_ = r.updateConfigStatus(ctx, func(status *policyv1alpha1.PolicyHubConfigStatus) {
+			status.Phase = "Error"
+			status.Message = fmt.Sprintf("Bootstrap failed: %v", err)
+		})
+		return fmt.Errorf("bootstrap failed: %w", err)
+	}
+
+	r.log.Info("Bootstrap successful",
+		"clusterId", resp.Cluster.ID,
+		"clusterName", resp.Cluster.Name,
+		"operatorId", resp.Cluster.OperatorID)
+
+	// Store the cluster token in a secret
+	clusterTokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "policy-hub-cluster-token",
+			Namespace: config.Namespace,
+		},
+		StringData: map[string]string{
+			"api-token": resp.ClusterToken,
+		},
+	}
+
+	// Create or update the secret
+	existingSecret := &corev1.Secret{}
+	err = r.client.Get(ctx, types.NamespacedName{
+		Name:      clusterTokenSecret.Name,
+		Namespace: clusterTokenSecret.Namespace,
+	}, existingSecret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.client.Create(ctx, clusterTokenSecret); err != nil {
+				return fmt.Errorf("failed to create cluster token secret: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to check for existing secret: %w", err)
+		}
+	} else {
+		existingSecret.StringData = clusterTokenSecret.StringData
+		if err := r.client.Update(ctx, existingSecret); err != nil {
+			return fmt.Errorf("failed to update cluster token secret: %w", err)
+		}
+	}
+
+	// Update config status with bootstrap results
+	if err := r.updateConfigStatus(ctx, func(status *policyv1alpha1.PolicyHubConfigStatus) {
+		status.Phase = "Registered"
+		status.Bootstrapped = true
+		status.ClusterID = resp.Cluster.ID
+		status.ClusterName = resp.Cluster.Name
+		status.OperatorID = resp.Cluster.OperatorID
+		status.Message = "Successfully bootstrapped and registered"
+		setCondition(&status.Conditions, metav1.Condition{
+			Type:               ConditionTypeRegistered,
+			Status:             metav1.ConditionTrue,
+			Reason:             "BootstrapSucceeded",
+			Message:            fmt.Sprintf("Bootstrapped cluster %s with ID %s", resp.Cluster.Name, resp.Cluster.ID),
+			LastTransitionTime: metav1.Now(),
+		})
+	}); err != nil {
+		r.log.Error(err, "Failed to update status after bootstrap")
+	}
+
+	// Now use the cluster token for the SaaS client
+	r.saasClient = saas.NewClient(
+		config.Spec.SaaSEndpoint,
+		resp.ClusterToken,
+		resp.Cluster.ID,
+		r.log,
+	)
+
+	r.operatorID = resp.Cluster.OperatorID
+	r.registered = true
+
+	// Create policy deployer
+	r.deployer = policy.NewDeployer(r.client, r.log)
+
+	return nil
+}
+
+// getRegistrationToken retrieves the registration token from the referenced secret
+func (r *Reconciler) getRegistrationToken(ctx context.Context, config *policyv1alpha1.PolicyHubConfig) (string, error) {
+	if config.Spec.RegistrationTokenSecretRef == nil {
+		return "", fmt.Errorf("registrationTokenSecretRef is not set")
+	}
+
+	secretNamespace := config.Spec.RegistrationTokenSecretRef.Namespace
+	if secretNamespace == "" {
+		secretNamespace = config.Namespace
+	}
+
+	secret := &corev1.Secret{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      config.Spec.RegistrationTokenSecretRef.Name,
+		Namespace: secretNamespace,
+	}, secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	token, ok := secret.Data[config.Spec.RegistrationTokenSecretRef.Key]
+	if !ok {
+		return "", fmt.Errorf("key %s not found in secret", config.Spec.RegistrationTokenSecretRef.Key)
+	}
+
+	return string(token), nil
 }
 
 // Register registers the operator with the SaaS platform

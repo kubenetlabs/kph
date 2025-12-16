@@ -21,7 +21,7 @@ type Client struct {
 	log        logr.Logger
 }
 
-// NewClient creates a new SaaS client
+// NewClient creates a new SaaS client with a cluster-specific token
 func NewClient(endpoint, apiToken, clusterID string, log logr.Logger) *Client {
 	return &Client{
 		endpoint:  endpoint,
@@ -32,6 +32,109 @@ func NewClient(endpoint, apiToken, clusterID string, log logr.Logger) *Client {
 		},
 		log: log.WithName("saas-client"),
 	}
+}
+
+// NewBootstrapClient creates a client for bootstrap mode (using registration token)
+func NewBootstrapClient(endpoint, registrationToken string, log logr.Logger) *Client {
+	return &Client{
+		endpoint:  endpoint,
+		apiToken:  registrationToken,
+		clusterID: "", // Will be set after bootstrap
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		log: log.WithName("saas-client-bootstrap"),
+	}
+}
+
+// SetAPIToken updates the API token (used after bootstrap)
+func (c *Client) SetAPIToken(token string) {
+	c.apiToken = token
+}
+
+// SetClusterID updates the cluster ID (used after bootstrap)
+func (c *Client) SetClusterID(clusterID string) {
+	c.clusterID = clusterID
+}
+
+// GetClusterID returns the current cluster ID
+func (c *Client) GetClusterID() string {
+	return c.clusterID
+}
+
+// BootstrapRequest is the request body for cluster bootstrap
+type BootstrapRequest struct {
+	ClusterName       string `json:"clusterName"`
+	OperatorVersion   string `json:"operatorVersion"`
+	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
+	NodeCount         int    `json:"nodeCount,omitempty"`
+	NamespaceCount    int    `json:"namespaceCount,omitempty"`
+	Provider          string `json:"provider,omitempty"`
+	Region            string `json:"region,omitempty"`
+	Environment       string `json:"environment,omitempty"`
+}
+
+// BootstrapResponse is the response from cluster bootstrap
+type BootstrapResponse struct {
+	Success      bool   `json:"success"`
+	Cluster      *BootstrapClusterInfo `json:"cluster,omitempty"`
+	ClusterToken string `json:"clusterToken,omitempty"`
+	TokenPrefix  string `json:"tokenPrefix,omitempty"`
+	Config       *BootstrapConfig `json:"config,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// BootstrapClusterInfo contains cluster info from bootstrap
+type BootstrapClusterInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	OperatorID string `json:"operatorId"`
+}
+
+// BootstrapConfig contains operator config from bootstrap
+type BootstrapConfig struct {
+	SyncInterval      int `json:"syncInterval"`
+	HeartbeatInterval int `json:"heartbeatInterval"`
+}
+
+// Bootstrap registers a new cluster and returns a cluster-specific token
+func (c *Client) Bootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapResponse, error) {
+	c.log.Info("Bootstrapping new cluster with SaaS platform", "clusterName", req.ClusterName)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal bootstrap request: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, "POST", "/api/operator/bootstrap", body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to bootstrap: %w", err)
+	}
+
+	var result BootstrapResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal bootstrap response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("bootstrap failed: %s", result.Error)
+	}
+
+	// Update client with the new cluster-specific token and ID
+	if result.ClusterToken != "" {
+		c.apiToken = result.ClusterToken
+	}
+	if result.Cluster != nil {
+		c.clusterID = result.Cluster.ID
+	}
+
+	c.log.Info("Successfully bootstrapped cluster",
+		"clusterId", c.clusterID,
+		"clusterName", result.Cluster.Name,
+		"operatorId", result.Cluster.OperatorID)
+
+	return &result, nil
 }
 
 // RegisterRequest is the request body for operator registration

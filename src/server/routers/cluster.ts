@@ -28,26 +28,29 @@ const updateClusterSchema = z.object({
 });
 
 export const clusterRouter = createTRPCRouter({
-  // List clusters for organization (used in policy form dropdown)
+  // List clusters for organization (used in policy form dropdown and clusters page)
   list: protectedProcedure.query(async ({ ctx }) => {
     const clusters = await ctx.db.cluster.findMany({
       where: {
         organizationId: ctx.organizationId,
       },
-      orderBy: { name: "asc" },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         name: true,
+        description: true,
         provider: true,
         region: true,
         environment: true,
         status: true,
         operatorInstalled: true,
         operatorVersion: true,
+        operatorId: true,
         lastHeartbeat: true,
         kubernetesVersion: true,
         nodeCount: true,
         namespaceCount: true,
+        createdAt: true,
         _count: {
           select: {
             policies: true,
@@ -414,4 +417,193 @@ EOF`;
         kubectlApply,
       };
     }),
+
+  // ============================================
+  // Registration Token Management
+  // ============================================
+
+  // Create a registration token (org-level token for operator bootstrap)
+  createRegistrationToken: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(100),
+      expiresInDays: z.number().int().min(1).max(365).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { token, tokenHash, prefix } = generateApiToken();
+
+      // Calculate expiration date if provided
+      const expiresAt = input.expiresInDays
+        ? new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000)
+        : null;
+
+      const apiToken = await ctx.db.apiToken.create({
+        data: {
+          name: input.name,
+          tokenHash,
+          prefix,
+          scopes: ["cluster:create"], // Only cluster:create scope - allows bootstrap
+          organizationId: ctx.organizationId,
+          expiresAt,
+          // Note: no clusterId - this is an org-level token
+        },
+      });
+
+      // Create audit log
+      await ctx.db.auditLog.create({
+        data: {
+          action: "registration_token.created",
+          resource: "ApiToken",
+          resourceId: apiToken.id,
+          userId: ctx.userId,
+          details: {
+            name: input.name,
+            expiresAt: expiresAt?.toISOString() ?? null,
+          },
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      return {
+        id: apiToken.id,
+        token, // Only returned once!
+        prefix,
+        name: apiToken.name,
+        expiresAt: apiToken.expiresAt,
+      };
+    }),
+
+  // List registration tokens for organization
+  listRegistrationTokens: protectedProcedure.query(async ({ ctx }) => {
+    const tokens = await ctx.db.apiToken.findMany({
+      where: {
+        organizationId: ctx.organizationId,
+        clusterId: null, // Only org-level tokens (no cluster)
+        scopes: { has: "cluster:create" },
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        prefix: true,
+        createdAt: true,
+        expiresAt: true,
+        lastUsedAt: true,
+        revokedAt: true,
+      },
+    });
+
+    return tokens;
+  }),
+
+  // Revoke a registration token
+  revokeRegistrationToken: protectedProcedure
+    .input(z.object({ tokenId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Find the token and verify ownership
+      const token = await ctx.db.apiToken.findFirst({
+        where: {
+          id: input.tokenId,
+          organizationId: ctx.organizationId,
+          clusterId: null, // Must be an org-level token
+        },
+      });
+
+      if (!token) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Registration token not found",
+        });
+      }
+
+      if (token.revokedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Token is already revoked",
+        });
+      }
+
+      // Revoke the token
+      await ctx.db.apiToken.update({
+        where: { id: input.tokenId },
+        data: { revokedAt: new Date() },
+      });
+
+      // Create audit log
+      await ctx.db.auditLog.create({
+        data: {
+          action: "registration_token.revoked",
+          resource: "ApiToken",
+          resourceId: input.tokenId,
+          userId: ctx.userId,
+          details: { name: token.name },
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      return { success: true };
+    }),
+
+  // Get installation instructions using registration token (new flow)
+  getBootstrapInstructions: protectedProcedure.query(async ({ ctx }) => {
+    const saasEndpoint = process.env.NEXTAUTH_URL ?? "https://policy-hub.example.com";
+
+    const helmInstall = `# Add the Policy Hub Helm repository
+helm repo add policy-hub https://charts.policy-hub.io
+helm repo update
+
+# Create namespace
+kubectl create namespace policy-hub-system
+
+# Create secret with registration token
+# Replace <REGISTRATION_TOKEN> with your token from the Policy Hub UI
+kubectl create secret generic policy-hub-registration \\
+  --namespace policy-hub-system \\
+  --from-literal=registration-token=<REGISTRATION_TOKEN>
+
+# Install the operator with bootstrap mode
+# The operator will automatically register and create the cluster
+helm install policy-hub-operator policy-hub/operator \\
+  --namespace policy-hub-system \\
+  --set config.saasEndpoint=${saasEndpoint} \\
+  --set config.clusterName=my-cluster \\
+  --set config.bootstrapMode=true \\
+  --set config.registrationTokenSecretRef.name=policy-hub-registration \\
+  --set config.registrationTokenSecretRef.key=registration-token`;
+
+    const kubectlApply = `# Create namespace
+kubectl create namespace policy-hub-system
+
+# Create secret with registration token
+# Replace <REGISTRATION_TOKEN> with your token from the Policy Hub UI
+kubectl create secret generic policy-hub-registration \\
+  --namespace policy-hub-system \\
+  --from-literal=registration-token=<REGISTRATION_TOKEN>
+
+# Apply the operator manifest
+kubectl apply -f https://raw.githubusercontent.com/policy-hub/operator/main/deploy/operator.yaml
+
+# Create the configuration for bootstrap mode
+# Replace "my-cluster" with your desired cluster name
+cat <<EOF | kubectl apply -f -
+apiVersion: policyhub.io/v1alpha1
+kind: PolicyHubConfig
+metadata:
+  name: policy-hub-config
+  namespace: policy-hub-system
+spec:
+  saasEndpoint: ${saasEndpoint}
+  clusterName: my-cluster
+  registrationTokenSecretRef:
+    name: policy-hub-registration
+    key: registration-token
+  syncInterval: 30s
+  heartbeatInterval: 60s
+EOF`;
+
+    return {
+      saasEndpoint,
+      helmInstall,
+      kubectlApply,
+    };
+  }),
 });

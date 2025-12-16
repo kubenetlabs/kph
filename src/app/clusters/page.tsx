@@ -1,64 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import CreateClusterForm from "~/components/clusters/create-cluster-form";
+import RegistrationTokens from "~/components/clusters/registration-tokens";
+import { trpc } from "~/lib/trpc";
 
-// Mock data - replace with database query
-const initialClusters = [
-  {
-    id: "1",
-    name: "prod-us-east",
-    description: "Production workloads - US East region",
-    provider: "AWS",
-    region: "us-east-1",
-    environment: "PRODUCTION",
-    status: "CONNECTED",
-    kubernetesVersion: "1.28.3",
-    nodeCount: 12,
-    namespaceCount: 24,
-    operatorInstalled: true,
-    operatorVersion: "0.1.0",
-    lastHeartbeat: new Date(),
-    createdAt: new Date("2024-01-15"),
-  },
-  {
-    id: "2",
-    name: "staging-us-west",
-    description: "Staging environment for pre-production testing",
-    provider: "AWS",
-    region: "us-west-2",
-    environment: "STAGING",
-    status: "CONNECTED",
-    kubernetesVersion: "1.28.3",
-    nodeCount: 4,
-    namespaceCount: 12,
-    operatorInstalled: true,
-    operatorVersion: "0.1.0",
-    lastHeartbeat: new Date(),
-    createdAt: new Date("2024-02-01"),
-  },
-  {
-    id: "3",
-    name: "dev-azure",
-    description: "Development cluster on Azure",
-    provider: "AZURE",
-    region: "eastus2",
-    environment: "DEVELOPMENT",
-    status: "PENDING",
-    kubernetesVersion: "1.27.8",
-    nodeCount: 3,
-    namespaceCount: 8,
-    operatorInstalled: false,
-    operatorVersion: null,
-    lastHeartbeat: null,
-    createdAt: new Date("2024-03-10"),
-  },
-];
+type TabType = "clusters" | "tokens";
 
 const statusConfig = {
   CONNECTED: { variant: "success" as const, label: "Connected" },
@@ -102,35 +55,31 @@ interface ClusterFormData {
 }
 
 export default function ClustersPage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TabType>("clusters");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
+
+  // Fetch clusters from database
+  const { data: clusters = [], isLoading, refetch } = trpc.cluster.list.useQuery();
+
+  const handleViewCluster = (clusterId: string) => {
+    router.push(`/clusters/${clusterId}`);
+  };
+
+  const handleEditCluster = (clusterId: string) => {
+    router.push(`/clusters/${clusterId}?edit=true`);
+  };
 
   const handleCreateCluster = async (data: ClusterFormData) => {
     setIsSubmitting(true);
 
-    // Simulate API call
+    // Simulate API call - in future, use trpc.cluster.create mutation
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
-    // Add new cluster to the list (in real app, this would come from the API response)
-    const newCluster: Cluster = {
-      id: String(Date.now()),
-      name: data.name,
-      description: data.description ?? "",
-      provider: data.provider,
-      region: data.region,
-      environment: data.environment,
-      status: "PENDING",
-      kubernetesVersion: null,
-      nodeCount: null,
-      namespaceCount: null,
-      operatorInstalled: false,
-      operatorVersion: null,
-      lastHeartbeat: null,
-      createdAt: new Date(),
-    };
+    // Refetch clusters to get the new one
+    await refetch();
 
-    setClusters((prev) => [newCluster, ...prev]);
     setIsSubmitting(false);
     setIsModalOpen(false);
   };
@@ -138,39 +87,83 @@ export default function ClustersPage() {
   return (
     <AppShell>
       {/* Page Header */}
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Clusters</h1>
           <p className="mt-1 text-muted">
             Manage your Kubernetes clusters and their Policy Hub operators
           </p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
-          <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Cluster
-        </Button>
+        {activeTab === "clusters" && (
+          <Button onClick={() => setIsModalOpen(true)}>
+            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Cluster
+          </Button>
+        )}
       </div>
 
-      {/* Filters */}
-      <div className="mb-6 flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted">Filter by:</span>
-          <Button variant="ghost" size="sm">
-            All Providers
-          </Button>
-          <Button variant="ghost" size="sm">
-            All Environments
-          </Button>
-          <Button variant="ghost" size="sm">
-            All Statuses
-          </Button>
+      {/* Tabs */}
+      <div className="mb-6 border-b border-border">
+        <div className="flex gap-4">
+          <button
+            type="button"
+            onClick={() => setActiveTab("clusters")}
+            className={`pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === "clusters"
+                ? "border-accent text-accent"
+                : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            Connected Clusters
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tokens")}
+            className={`pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === "tokens"
+                ? "border-accent text-accent"
+                : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            Registration Tokens
+          </button>
         </div>
       </div>
 
+      {/* Registration Tokens Tab */}
+      {activeTab === "tokens" && <RegistrationTokens />}
+
+      {/* Clusters Tab */}
+      {activeTab === "clusters" && (
+        <>
+          {/* Filters */}
+          <div className="mb-6 flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted">Filter by:</span>
+              <Button variant="ghost" size="sm">
+                All Providers
+              </Button>
+              <Button variant="ghost" size="sm">
+                All Environments
+              </Button>
+              <Button variant="ghost" size="sm">
+                All Statuses
+              </Button>
+            </div>
+          </div>
+
+      {/* Loading State */}
+      {isLoading && (
+        <Card className="py-12 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-accent border-t-transparent"></div>
+          <p className="mt-4 text-muted">Loading clusters...</p>
+        </Card>
+      )}
+
       {/* Clusters Table */}
-      {clusters.length > 0 && (
+      {!isLoading && clusters.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <table className="w-full">
@@ -209,7 +202,9 @@ export default function ClustersPage() {
                       <td className="px-4 py-4">
                         <div>
                           <p className="font-medium text-foreground">{cluster.name}</p>
-                          <p className="text-sm text-muted">{cluster.description}</p>
+                          {cluster.description && (
+                            <p className="text-sm text-muted">{cluster.description}</p>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-4">
@@ -256,10 +251,18 @@ export default function ClustersPage() {
                       </td>
                       <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewCluster(cluster.id)}
+                          >
                             View
                           </Button>
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEditCluster(cluster.id)}
+                          >
                             Edit
                           </Button>
                         </div>
@@ -273,25 +276,27 @@ export default function ClustersPage() {
         </Card>
       )}
 
-      {/* Empty State */}
-      {clusters.length === 0 && (
-        <Card className="py-12 text-center">
-          <div className="mx-auto h-12 w-12 rounded-full bg-card-hover p-3 text-muted">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-          </div>
-          <h3 className="mt-4 text-lg font-medium text-foreground">No clusters yet</h3>
-          <p className="mt-2 text-sm text-muted">
-            Get started by connecting your first Kubernetes cluster.
-          </p>
-          <Button className="mt-6" onClick={() => setIsModalOpen(true)}>
-            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add Your First Cluster
-          </Button>
-        </Card>
+          {/* Empty State */}
+          {!isLoading && clusters.length === 0 && (
+            <Card className="py-12 text-center">
+              <div className="mx-auto h-12 w-12 rounded-full bg-card-hover p-3 text-muted">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </div>
+              <h3 className="mt-4 text-lg font-medium text-foreground">No clusters yet</h3>
+              <p className="mt-2 text-sm text-muted">
+                Get started by connecting your first Kubernetes cluster.
+              </p>
+              <Button className="mt-6" onClick={() => setIsModalOpen(true)}>
+                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Your First Cluster
+              </Button>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Create Cluster Modal */}

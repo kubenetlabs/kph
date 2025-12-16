@@ -20,6 +20,9 @@ spec:
         - jsonPath: .status.phase
           name: Phase
           type: string
+        - jsonPath: .status.clusterId
+          name: Cluster ID
+          type: string
         - jsonPath: .status.managedPolicies
           name: Policies
           type: integer
@@ -44,7 +47,23 @@ spec:
               description: PolicyHubConfigSpec defines the desired state of PolicyHubConfig
               properties:
                 apiTokenSecretRef:
-                  description: APITokenSecretRef references the secret containing the API token
+                  description: APITokenSecretRef references the secret containing the cluster-specific API token (for legacy mode)
+                  properties:
+                    key:
+                      description: Key in the secret to select
+                      type: string
+                    name:
+                      description: Name of the secret
+                      type: string
+                    namespace:
+                      description: Namespace of the secret (defaults to the PolicyHubConfig namespace)
+                      type: string
+                  required:
+                    - key
+                    - name
+                  type: object
+                registrationTokenSecretRef:
+                  description: RegistrationTokenSecretRef references the secret containing the registration token (for bootstrap mode)
                   properties:
                     key:
                       description: Key in the secret to select
@@ -60,7 +79,19 @@ spec:
                     - name
                   type: object
                 clusterId:
-                  description: ClusterID is the unique identifier for this cluster in the SaaS platform
+                  description: ClusterID is the unique identifier for this cluster (legacy mode - leave empty for bootstrap)
+                  type: string
+                clusterName:
+                  description: ClusterName is the name for this cluster (bootstrap mode)
+                  type: string
+                provider:
+                  description: Provider is the cloud provider (AWS, GCP, AZURE, ON_PREM, OTHER)
+                  type: string
+                region:
+                  description: Region is the cluster region
+                  type: string
+                environment:
+                  description: Environment is the cluster environment (DEVELOPMENT, STAGING, PRODUCTION, TESTING)
                   type: string
                 flowCollection:
                   description: FlowCollection configures Hubble flow data collection
@@ -102,8 +133,6 @@ spec:
                     type: string
                   type: array
               required:
-                - apiTokenSecretRef
-                - clusterId
                 - saasEndpoint
               type: object
             status:
@@ -164,10 +193,20 @@ spec:
                 operatorId:
                   description: OperatorID is the unique identifier assigned during registration
                   type: string
+                clusterId:
+                  description: ClusterID is the cluster ID (set after bootstrap or from spec)
+                  type: string
+                clusterName:
+                  description: ClusterName is the cluster name
+                  type: string
+                bootstrapped:
+                  description: Bootstrapped indicates if bootstrap registration completed
+                  type: boolean
                 phase:
                   description: Phase represents the current phase of the operator
                   enum:
                     - Initializing
+                    - Bootstrapping
                     - Registered
                     - Syncing
                     - Error
