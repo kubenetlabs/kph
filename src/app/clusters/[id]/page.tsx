@@ -42,7 +42,7 @@ export default function ClusterDetailPage() {
 
   const updateMutation = trpc.cluster.update.useMutation({
     onSuccess: () => {
-      refetch();
+      void refetch();
       setIsEditModalOpen(false);
     },
   });
@@ -156,7 +156,7 @@ export default function ClusterDetailPage() {
           <CardContent className="p-4">
             <p className="text-sm text-muted">Kubernetes Version</p>
             <p className="text-xl font-semibold text-foreground">
-              {cluster.kubernetesVersion || "Unknown"}
+              {cluster.kubernetesVersion ?? "Unknown"}
             </p>
           </CardContent>
         </Card>

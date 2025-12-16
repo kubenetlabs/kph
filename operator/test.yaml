@@ -1,0 +1,13 @@
+apiVersion: policyhub.io/v1alpha1
+kind: PolicyHubConfig
+metadata:
+  name: policy-hub-config
+  namespace: policy-hub-system
+spec:
+  saasEndpoint: http://localhost:3000
+  clusterId: local-test
+  apiTokenSecretRef:
+    name: policy-hub-operator
+    key: api-token
+  syncInterval: 30s
+  heartbeatInterval: 60s

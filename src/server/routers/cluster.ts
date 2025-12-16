@@ -544,7 +544,7 @@ EOF`;
     }),
 
   // Get installation instructions using registration token (new flow)
-  getBootstrapInstructions: protectedProcedure.query(async ({ ctx }) => {
+  getBootstrapInstructions: protectedProcedure.query(async ({ ctx: _ctx }) => {
     const saasEndpoint = process.env.NEXTAUTH_URL ?? "https://policy-hub.example.com";
 
     const helmInstall = `# Add the Policy Hub Helm repository

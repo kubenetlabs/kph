@@ -28,22 +28,6 @@ const environmentConfig = {
   TESTING: { variant: "muted" as const, label: "Testing" },
 };
 
-interface Cluster {
-  id: string;
-  name: string;
-  description: string;
-  provider: string;
-  region: string;
-  environment: string;
-  status: string;
-  kubernetesVersion: string | null;
-  nodeCount: number | null;
-  namespaceCount: number | null;
-  operatorInstalled: boolean;
-  operatorVersion: string | null;
-  lastHeartbeat: Date | null;
-  createdAt: Date;
-}
 
 interface ClusterFormData {
   name: string;
@@ -71,7 +55,7 @@ export default function ClustersPage() {
     router.push(`/clusters/${clusterId}?edit=true`);
   };
 
-  const handleCreateCluster = async (data: ClusterFormData) => {
+  const handleCreateCluster = async (_data: ClusterFormData) => {
     setIsSubmitting(true);
 
     // Simulate API call - in future, use trpc.cluster.create mutation
