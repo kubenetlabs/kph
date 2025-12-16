@@ -26,6 +26,7 @@ model Organization {
   clusters    Cluster[]
   policies    Policy[]
   simulations Simulation[]
+  apiTokens   ApiToken[]
 
   @@map("organizations")
 }
@@ -123,6 +124,7 @@ model Cluster {
   // Operator status
   operatorInstalled Boolean   @default(false)
   operatorVersion   String?
+  operatorId        String?   @unique // UUID assigned during operator registration
   lastHeartbeat     DateTime?
 
   // Metadata
@@ -141,6 +143,7 @@ model Cluster {
   policies    Policy[]
   flowRecords FlowRecord[]
   simulations Simulation[]
+  apiTokens   ApiToken[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -389,4 +392,33 @@ model AuditLog {
   @@index([organizationId, timestamp])
   @@index([resource, resourceId])
   @@map("audit_logs")
+}
+
+// ============================================================================
+// API TOKENS (for Operator Authentication)
+// ============================================================================
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  name        String
+  tokenHash   String    @unique  // SHA-256 hash of the actual token
+  prefix      String              // First 8 chars for identification (e.g., "phub_xxx")
+  scopes      String[]            // ["cluster:read", "cluster:write", "policy:read", "flow:write"]
+
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  // Links to cluster for cluster-scoped tokens
+  clusterId      String?
+  cluster        Cluster?  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([clusterId])
+  @@map("api_tokens")
 }

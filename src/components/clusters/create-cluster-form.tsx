@@ -5,6 +5,7 @@ import { z } from "zod";
 import Button from "~/components/ui/button";
 import Input from "~/components/ui/input";
 import Select from "~/components/ui/select";
+import { trpc } from "~/lib/trpc";
 
 // Zod schema for cluster validation
 const createClusterSchema = z.object({
@@ -34,6 +35,12 @@ const createClusterSchema = z.object({
     .string()
     .min(1, "Kubernetes API endpoint is required")
     .url("Please enter a valid URL (e.g., https://api.cluster.example.com)"),
+  authToken: z
+    .string()
+    .min(1, "Service account token is required"),
+  caCert: z
+    .string()
+    .optional(),
 });
 
 type CreateClusterFormData = z.infer<typeof createClusterSchema>;
@@ -45,6 +52,16 @@ interface FormErrors {
   region?: string;
   environment?: string;
   endpoint?: string;
+  authToken?: string;
+  caCert?: string;
+}
+
+interface ConnectionResult {
+  success: boolean;
+  kubernetesVersion?: string;
+  nodeCount?: number;
+  namespaceCount?: number;
+  error?: string;
 }
 
 interface CreateClusterFormProps {
@@ -88,15 +105,22 @@ export default function CreateClusterForm({
     region: "",
     environment: undefined,
     endpoint: "",
+    authToken: "",
+    caCert: "",
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [showToken, setShowToken] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const testConnectionMutation = trpc.cluster.testConnection.useMutation();
 
   const validateField = (field: keyof CreateClusterFormData, value: unknown) => {
     const partialSchema = createClusterSchema.shape[field];
     const result = partialSchema.safeParse(value);
-    
+
     if (!result.success) {
       return result.error.errors[0]?.message ?? "Invalid value";
     }
@@ -108,18 +132,62 @@ export default function CreateClusterForm({
     value: string
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    
+
     // Clear error when user starts typing
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
+    }
+
+    // Clear connection result when connection params change
+    if (field === "endpoint" || field === "authToken" || field === "caCert") {
+      setConnectionResult(null);
     }
   };
 
   const handleBlur = (field: keyof CreateClusterFormData) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
-    
+
     const error = validateField(field, formData[field]);
     setErrors((prev) => ({ ...prev, [field]: error }));
+  };
+
+  const handleTestConnection = async () => {
+    // Validate connection fields first
+    const endpointError = validateField("endpoint", formData.endpoint);
+    const tokenError = validateField("authToken", formData.authToken);
+
+    if (endpointError !== undefined || tokenError !== undefined) {
+      setErrors((prev) => ({
+        ...prev,
+        endpoint: endpointError,
+        authToken: tokenError,
+      }));
+      setTouched((prev) => ({
+        ...prev,
+        endpoint: true,
+        authToken: true,
+      }));
+      return;
+    }
+
+    setIsTesting(true);
+    setConnectionResult(null);
+
+    try {
+      const result = await testConnectionMutation.mutateAsync({
+        endpoint: formData.endpoint!,
+        token: formData.authToken!,
+        caCert: formData.caCert ? formData.caCert : undefined,
+      });
+      setConnectionResult(result);
+    } catch (error) {
+      setConnectionResult({
+        success: false,
+        error: error instanceof Error ? error.message : "Connection test failed",
+      });
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -144,6 +212,8 @@ export default function CreateClusterForm({
         region: true,
         environment: true,
         endpoint: true,
+        authToken: true,
+        caCert: true,
       });
       return;
     }
@@ -248,6 +318,108 @@ export default function CreateClusterForm({
         disabled={isLoading}
       />
 
+      {/* Service Account Token */}
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-1.5">
+          Service Account Token
+        </label>
+        <div className="relative">
+          <textarea
+            placeholder="eyJhbGciOiJSUzI1NiIsImtpZCI6..."
+            value={formData.authToken}
+            onChange={(e) => handleChange("authToken", e.target.value)}
+            onBlur={() => handleBlur("authToken")}
+            className={`w-full rounded-lg border bg-card px-3 py-2 text-sm text-foreground placeholder-muted focus:outline-none focus:ring-2 font-mono h-24 resize-none ${
+              touched.authToken && errors.authToken
+                ? "border-danger focus:ring-danger/50"
+                : "border-border focus:ring-accent/50"
+            }`}
+            disabled={isLoading}
+            style={{ WebkitTextSecurity: showToken ? "none" : "disc" } as React.CSSProperties}
+          />
+          <button
+            type="button"
+            onClick={() => setShowToken(!showToken)}
+            className="absolute right-2 top-2 text-muted hover:text-foreground"
+          >
+            {showToken ? (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            )}
+          </button>
+        </div>
+        <p className={`mt-1 text-xs ${touched.authToken && errors.authToken ? "text-danger" : "text-muted"}`}>
+          {touched.authToken && errors.authToken
+            ? errors.authToken
+            : "The service account token for authenticating to the cluster"}
+        </p>
+      </div>
+
+      {/* CA Certificate (Optional) */}
+      <div>
+        <label className="block text-sm font-medium text-foreground mb-1.5">
+          CA Certificate <span className="text-muted font-normal">(optional)</span>
+        </label>
+        <textarea
+          placeholder="-----BEGIN CERTIFICATE-----&#10;MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiU..."
+          value={formData.caCert}
+          onChange={(e) => handleChange("caCert", e.target.value)}
+          onBlur={() => handleBlur("caCert")}
+          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder-muted focus:outline-none focus:ring-2 focus:ring-accent/50 font-mono h-24 resize-none"
+          disabled={isLoading}
+        />
+        <p className="mt-1 text-xs text-muted">
+          Base64-encoded CA certificate for clusters with self-signed certificates
+        </p>
+      </div>
+
+      {/* Test Connection Button */}
+      <div className="flex items-center gap-4">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleTestConnection}
+          disabled={isLoading || isTesting || !formData.endpoint || !formData.authToken}
+          isLoading={isTesting}
+        >
+          <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          Test Connection
+        </Button>
+
+        {/* Connection Result */}
+        {connectionResult && (
+          <div className={`flex items-center gap-2 text-sm ${connectionResult.success ? "text-success" : "text-danger"}`}>
+            {connectionResult.success ? (
+              <>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>
+                  Connected - K8s {connectionResult.kubernetesVersion}
+                  {connectionResult.nodeCount !== undefined && ` | ${connectionResult.nodeCount} nodes`}
+                  {connectionResult.namespaceCount !== undefined && ` | ${connectionResult.namespaceCount} namespaces`}
+                </span>
+              </>
+            ) : (
+              <>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{connectionResult.error}</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Security Notice */}
       <div className="rounded-md border border-warning/30 bg-warning/10 p-3">
         <div className="flex gap-2">
@@ -267,7 +439,7 @@ export default function CreateClusterForm({
           <div>
             <p className="text-sm font-medium text-warning">Security Note</p>
             <p className="mt-1 text-xs text-muted">
-              After creating the cluster, you&apos;ll need to install the Policy Hub operator and configure authentication credentials.
+              Your service account token is encrypted before storage. After creating the cluster, you&apos;ll receive an API token to install the Policy Hub operator.
             </p>
           </div>
         </div>
@@ -303,4 +475,3 @@ export default function CreateClusterForm({
     </form>
   );
 }
-

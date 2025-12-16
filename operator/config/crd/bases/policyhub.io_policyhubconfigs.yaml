@@ -1,0 +1,180 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: policyhubconfigs.policyhub.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+spec:
+  group: policyhub.io
+  names:
+    kind: PolicyHubConfig
+    listKind: PolicyHubConfigList
+    plural: policyhubconfigs
+    shortNames:
+      - phc
+    singular: policyhubconfig
+  scope: Namespaced
+  versions:
+    - additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .status.managedPolicies
+          name: Policies
+          type: integer
+        - jsonPath: .status.lastSync
+          name: Last Sync
+          type: date
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: PolicyHubConfig is the Schema for the policyhubconfigs API
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: PolicyHubConfigSpec defines the desired state of PolicyHubConfig
+              properties:
+                apiTokenSecretRef:
+                  description: APITokenSecretRef references the secret containing the API token
+                  properties:
+                    key:
+                      description: Key in the secret to select
+                      type: string
+                    name:
+                      description: Name of the secret
+                      type: string
+                    namespace:
+                      description: Namespace of the secret (defaults to the PolicyHubConfig namespace)
+                      type: string
+                  required:
+                    - key
+                    - name
+                  type: object
+                clusterId:
+                  description: ClusterID is the unique identifier for this cluster in the SaaS platform
+                  type: string
+                flowCollection:
+                  description: FlowCollection configures Hubble flow data collection
+                  properties:
+                    batchSize:
+                      default: 500
+                      description: BatchSize is the number of flows to buffer before sending
+                      maximum: 10000
+                      minimum: 1
+                      type: integer
+                    enabled:
+                      default: true
+                      description: Enabled enables flow data collection from Hubble
+                      type: boolean
+                    flushInterval:
+                      default: 10s
+                      description: FlushInterval is how often to flush the flow buffer
+                      type: string
+                    hubbleAddress:
+                      default: hubble-relay.kube-system.svc.cluster.local:4245
+                      description: HubbleAddress is the address of the Hubble relay service
+                      type: string
+                  type: object
+                heartbeatInterval:
+                  default: 60s
+                  description: HeartbeatInterval is how often to send heartbeats to the SaaS platform
+                  type: string
+                saasEndpoint:
+                  description: SaaSEndpoint is the URL of the Policy Hub SaaS platform
+                  pattern: ^https?://
+                  type: string
+                syncInterval:
+                  default: 30s
+                  description: SyncInterval is how often to sync policies from the SaaS platform
+                  type: string
+                targetNamespaces:
+                  description: TargetNamespaces limits policy deployment to specific namespaces
+                  items:
+                    type: string
+                  type: array
+              required:
+                - apiTokenSecretRef
+                - clusterId
+                - saasEndpoint
+              type: object
+            status:
+              description: PolicyHubConfigStatus defines the observed state of PolicyHubConfig
+              properties:
+                conditions:
+                  description: Conditions represent the latest available observations
+                  items:
+                    description: Condition contains details for one aspect of the current state
+                    properties:
+                      lastTransitionTime:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 32768
+                        type: string
+                      observedGeneration:
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                lastHeartbeat:
+                  description: LastHeartbeat is the timestamp of the last successful heartbeat
+                  format: date-time
+                  type: string
+                lastSync:
+                  description: LastSync is the timestamp of the last successful policy sync
+                  format: date-time
+                  type: string
+                managedPolicies:
+                  description: ManagedPolicies is the count of policies being managed
+                  type: integer
+                message:
+                  description: Message provides additional status information
+                  type: string
+                operatorId:
+                  description: OperatorID is the unique identifier assigned during registration
+                  type: string
+                phase:
+                  description: Phase represents the current phase of the operator
+                  enum:
+                    - Initializing
+                    - Registered
+                    - Syncing
+                    - Error
+                  type: string
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}

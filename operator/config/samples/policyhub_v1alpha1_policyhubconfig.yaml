@@ -1,0 +1,44 @@
+---
+apiVersion: policyhub.io/v1alpha1
+kind: PolicyHubConfig
+metadata:
+  name: policy-hub-config
+  namespace: policy-hub-system
+spec:
+  # URL of your Policy Hub SaaS platform
+  saasEndpoint: https://policy-hub.example.com
+
+  # Cluster ID from your Policy Hub dashboard
+  clusterId: clxxxxxxxxxxxxxxxx
+
+  # Reference to the secret containing your API token
+  apiTokenSecretRef:
+    name: policy-hub-operator
+    key: api-token
+
+  # How often to sync policies (default: 30s)
+  syncInterval: 30s
+
+  # How often to send heartbeats (default: 60s)
+  heartbeatInterval: 60s
+
+  # Optional: Hubble flow collection settings
+  flowCollection:
+    enabled: true
+    hubbleAddress: hubble-relay.kube-system.svc.cluster.local:4245
+    batchSize: 500
+    flushInterval: 10s
+
+  # Optional: Limit policy deployment to specific namespaces
+  # Leave empty for all namespaces
+  targetNamespaces: []
+---
+# Secret containing the API token (create separately)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: policy-hub-operator
+  namespace: policy-hub-system
+type: Opaque
+stringData:
+  api-token: phub_your-api-token-here

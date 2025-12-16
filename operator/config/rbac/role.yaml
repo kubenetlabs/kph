@@ -1,0 +1,165 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: policy-hub-operator-role
+rules:
+  # PolicyHubConfig permissions
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - policyhubconfigs
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - policyhubconfigs/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - policyhubconfigs/finalizers
+    verbs:
+      - update
+
+  # ManagedPolicy permissions
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - managedpolicies
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - managedpolicies/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - policyhub.io
+    resources:
+      - managedpolicies/finalizers
+    verbs:
+      - update
+
+  # Core resources (read-only for cluster info)
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Secrets (for API token)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Events
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+
+  # Cilium Network Policies
+  - apiGroups:
+      - cilium.io
+    resources:
+      - ciliumnetworkpolicies
+      - ciliumclusterwidenetworkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Tetragon Tracing Policies
+  - apiGroups:
+      - cilium.io
+    resources:
+      - tracingpolicies
+      - tracingpoliciesnamespaced
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Gateway API Resources
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - httproutes
+      - grpcroutes
+      - tcproutes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Standard Network Policies (fallback)
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Leader election
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete

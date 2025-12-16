@@ -38,3 +38,4 @@ prisma/migrations
 # Misc
 *.tsbuildinfo
 next-env.d.ts
+.vercel
