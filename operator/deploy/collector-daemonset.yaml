@@ -1,0 +1,299 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: policy-hub-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: policy-hub-collector
+rules:
+  # Read pods for endpoint resolution
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  # Read network policies for correlation
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  # Read Cilium policies for correlation
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: policy-hub-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: policy-hub-collector
+subjects:
+  - kind: ServiceAccount
+    name: policy-hub-collector
+    namespace: policy-hub-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: policy-hub-collector-config
+  namespace: policy-hub-system
+data:
+  # Hubble configuration
+  HUBBLE_ADDRESS: "hubble-relay.kube-system.svc.cluster.local:4245"
+  HUBBLE_ENABLED: "true"
+
+  # Tetragon configuration
+  TETRAGON_ADDRESS: "unix:///var/run/tetragon/tetragon.sock"
+  TETRAGON_ENABLED: "true"
+
+  # Storage configuration
+  STORAGE_PATH: "/var/lib/policyhub/telemetry"
+  RETENTION_DAYS: "7"
+  MAX_STORAGE_GB: "100"
+
+  # Buffer configuration
+  BUFFER_SIZE: "10000"
+  FLUSH_INTERVAL: "30s"
+
+  # SaaS sync configuration
+  SAAS_ENABLED: "true"
+  AGGREGATION_WINDOW: "1m"
+
+  # Logging
+  LOG_LEVEL: "info"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-collector
+    app.kubernetes.io/component: telemetry
+    app.kubernetes.io/part-of: policy-hub
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-hub-collector
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-hub-collector
+        app.kubernetes.io/component: telemetry
+        app.kubernetes.io/part-of: policy-hub
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: policy-hub-collector
+      hostNetwork: false
+      dnsPolicy: ClusterFirst
+      terminationGracePeriodSeconds: 30
+
+      # Ensure collector runs on all nodes including control plane
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+
+      # Priority to ensure collector is scheduled
+      priorityClassName: system-node-critical
+
+      containers:
+        - name: collector
+          image: ghcr.io/policy-hub/collector:latest
+          imagePullPolicy: IfNotPresent
+
+          args:
+            - --hubble-address=$(HUBBLE_ADDRESS)
+            - --tetragon-address=$(TETRAGON_ADDRESS)
+            - --storage-path=$(STORAGE_PATH)
+            - --node-name=$(NODE_NAME)
+            - --cluster-id=$(CLUSTER_ID)
+
+          envFrom:
+            - configMapRef:
+                name: policy-hub-collector-config
+
+          env:
+            # Node name from downward API
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Cluster ID from secret
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-collector-secrets
+                  key: cluster-id
+                  optional: true
+            # SaaS API endpoint from secret
+            - name: SAAS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-collector-secrets
+                  key: saas-endpoint
+                  optional: true
+            # SaaS API key from secret
+            - name: SAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-collector-secrets
+                  key: saas-api-key
+                  optional: true
+
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            # Telemetry storage (persistent)
+            - name: telemetry-storage
+              mountPath: /var/lib/policyhub/telemetry
+
+            # Tetragon socket (read-only)
+            - name: tetragon-sock
+              mountPath: /var/run/tetragon
+              readOnly: true
+
+            # Tmp for SQLite WAL files
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # Persistent storage for telemetry data
+        - name: telemetry-storage
+          hostPath:
+            path: /var/lib/policyhub/telemetry
+            type: DirectoryOrCreate
+
+        # Tetragon socket directory
+        - name: tetragon-sock
+          hostPath:
+            path: /var/run/tetragon
+            type: DirectoryOrCreate
+
+        # Tmp directory for working files
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-collector
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for direct pod access
+  selector:
+    app.kubernetes.io/name: policy-hub-collector
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+# Optional: Secret template for SaaS configuration
+# Users should create this secret with their actual values
+apiVersion: v1
+kind: Secret
+metadata:
+  name: policy-hub-collector-secrets
+  namespace: policy-hub-system
+type: Opaque
+stringData:
+  cluster-id: ""      # Set to your cluster ID
+  saas-endpoint: ""   # Set to your SaaS API endpoint
+  saas-api-key: ""    # Set to your SaaS API key
+---
+# PodDisruptionBudget to ensure availability during upgrades
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-hub-collector
+---
+# ServiceMonitor for Prometheus Operator (optional)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-collector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-hub-collector
+  namespaceSelector:
+    matchNames:
+      - policy-hub-system
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
