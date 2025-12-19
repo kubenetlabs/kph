@@ -20,6 +20,7 @@ import (
 
 	"github.com/policy-hub/operator/internal/telemetry/collector"
 	"github.com/policy-hub/operator/internal/telemetry/models"
+	"github.com/policy-hub/operator/internal/telemetry/storage"
 )
 
 const (
@@ -103,6 +104,26 @@ func main() {
 		cancel()
 	}()
 
+	// Initialize storage manager
+	storageMgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath:      cfg.StoragePath,
+		NodeName:      cfg.NodeName,
+		RetentionDays: cfg.RetentionDays,
+		MaxStorageGB:  int64(cfg.MaxStorageGB),
+		Logger:        log,
+	})
+	if err != nil {
+		log.Error(err, "Failed to initialize storage manager")
+		os.Exit(1)
+	}
+	defer storageMgr.Close()
+
+	// Start storage manager (retention worker, etc.)
+	if err := storageMgr.Start(ctx); err != nil {
+		log.Error(err, "Failed to start storage manager")
+		os.Exit(1)
+	}
+
 	// Initialize ring buffer
 	buffer := collector.NewRingBuffer(collector.RingBufferConfig{
 		Size:           cfg.BufferSize,
@@ -111,10 +132,13 @@ func main() {
 		Logger:         log,
 	})
 
-	// Set up flush handler (writes to storage)
+	// Set up flush handler to write to storage
 	buffer.SetFlushHandler(func(events []*models.TelemetryEvent) error {
-		// TODO: Implement storage writer in Phase 2
-		log.V(1).Info("Would flush events to storage", "count", len(events))
+		if err := storageMgr.Write(events); err != nil {
+			log.Error(err, "Failed to write events to storage", "count", len(events))
+			return err
+		}
+		log.V(1).Info("Flushed events to storage", "count", len(events))
 		return nil
 	})
 
@@ -145,19 +169,24 @@ func main() {
 	// TODO: Initialize and start Tetragon client in Phase 3
 
 	// Start health server
-	go startHealthServer(cfg.HealthPort, buffer, log)
+	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
 
 	// Start metrics server
-	go startMetricsServer(cfg.MetricsPort, buffer, log)
+	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
 
 	log.Info("Collector shutting down")
 
-	// Final flush
+	// Final flush of buffer
 	if err := buffer.Flush(); err != nil {
-		log.Error(err, "Final flush failed")
+		log.Error(err, "Final buffer flush failed")
+	}
+
+	// Final flush of storage
+	if err := storageMgr.Flush(); err != nil {
+		log.Error(err, "Final storage flush failed")
 	}
 
 	log.Info("Collector stopped")
@@ -271,7 +300,7 @@ func runHubbleCollector(ctx context.Context, client *collector.HubbleClient, log
 	}
 }
 
-func startHealthServer(port int, buffer *collector.RingBuffer, log logr.Logger) {
+func startHealthServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -298,35 +327,65 @@ func startHealthServer(port int, buffer *collector.RingBuffer, log logr.Logger) 
 	}
 }
 
-func startMetricsServer(port int, buffer *collector.RingBuffer, log logr.Logger) {
+func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		metrics := buffer.GetMetrics()
+		bufferMetrics := buffer.GetMetrics()
 		w.Header().Set("Content-Type", "text/plain")
+
+		// Buffer metrics
 		fmt.Fprintf(w, "# HELP policyhub_collector_buffer_count Current events in buffer\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_buffer_count gauge\n")
-		fmt.Fprintf(w, "policyhub_collector_buffer_count %d\n", metrics.CurrentCount)
+		fmt.Fprintf(w, "policyhub_collector_buffer_count %d\n", bufferMetrics.CurrentCount)
 
 		fmt.Fprintf(w, "# HELP policyhub_collector_buffer_capacity Buffer capacity\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_buffer_capacity gauge\n")
-		fmt.Fprintf(w, "policyhub_collector_buffer_capacity %d\n", metrics.Capacity)
+		fmt.Fprintf(w, "policyhub_collector_buffer_capacity %d\n", bufferMetrics.Capacity)
 
 		fmt.Fprintf(w, "# HELP policyhub_collector_events_received_total Total events received\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_events_received_total counter\n")
-		fmt.Fprintf(w, "policyhub_collector_events_received_total %d\n", metrics.TotalReceived)
+		fmt.Fprintf(w, "policyhub_collector_events_received_total %d\n", bufferMetrics.TotalReceived)
 
 		fmt.Fprintf(w, "# HELP policyhub_collector_events_flushed_total Total events flushed\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_events_flushed_total counter\n")
-		fmt.Fprintf(w, "policyhub_collector_events_flushed_total %d\n", metrics.TotalFlushed)
+		fmt.Fprintf(w, "policyhub_collector_events_flushed_total %d\n", bufferMetrics.TotalFlushed)
 
 		fmt.Fprintf(w, "# HELP policyhub_collector_events_dropped_total Total events dropped\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_events_dropped_total counter\n")
-		fmt.Fprintf(w, "policyhub_collector_events_dropped_total %d\n", metrics.TotalDropped)
+		fmt.Fprintf(w, "policyhub_collector_events_dropped_total %d\n", bufferMetrics.TotalDropped)
 
 		fmt.Fprintf(w, "# HELP policyhub_collector_buffer_fill_percentage Buffer fill percentage\n")
 		fmt.Fprintf(w, "# TYPE policyhub_collector_buffer_fill_percentage gauge\n")
-		fmt.Fprintf(w, "policyhub_collector_buffer_fill_percentage %.2f\n", metrics.FillPercentage)
+		fmt.Fprintf(w, "policyhub_collector_buffer_fill_percentage %.2f\n", bufferMetrics.FillPercentage)
+
+		// Storage metrics
+		storageStats, err := storageMgr.GetStats(r.Context())
+		if err == nil && storageStats != nil {
+			if storageStats.IndexStats != nil {
+				fmt.Fprintf(w, "# HELP policyhub_collector_storage_events_total Total events in storage\n")
+				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_events_total gauge\n")
+				fmt.Fprintf(w, "policyhub_collector_storage_events_total %d\n", storageStats.IndexStats.TotalEvents)
+
+				fmt.Fprintf(w, "# HELP policyhub_collector_storage_files_total Total Parquet files\n")
+				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_files_total gauge\n")
+				fmt.Fprintf(w, "policyhub_collector_storage_files_total %d\n", storageStats.IndexStats.TotalFiles)
+
+				fmt.Fprintf(w, "# HELP policyhub_collector_storage_bytes Total storage bytes\n")
+				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_bytes gauge\n")
+				fmt.Fprintf(w, "policyhub_collector_storage_bytes %d\n", storageStats.IndexStats.TotalSizeBytes)
+			}
+
+			if storageStats.RetentionStats != nil {
+				fmt.Fprintf(w, "# HELP policyhub_collector_storage_usage_percent Storage usage percentage\n")
+				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_usage_percent gauge\n")
+				fmt.Fprintf(w, "policyhub_collector_storage_usage_percent %.2f\n", storageStats.RetentionStats.StorageUsagePercent)
+
+				fmt.Fprintf(w, "# HELP policyhub_collector_storage_days_stored Days of data stored\n")
+				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_days_stored gauge\n")
+				fmt.Fprintf(w, "policyhub_collector_storage_days_stored %d\n", storageStats.RetentionStats.DaysStored)
+			}
+		}
 	})
 
 	addr := fmt.Sprintf(":%d", port)
