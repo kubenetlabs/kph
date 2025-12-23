@@ -37,10 +37,17 @@ const ProcessSummarySchema = z.object({
   windowEnd: z.string().datetime(),
   nodeName: z.string(),
   namespace: z.string(),
-  podName: z.string(),
-  processName: z.string(),
-  execCount: z.number().int(),
+  podName: z.string().optional(),
+  processName: z.string().optional(),
+  execCount: z.number().int().optional(),
+  totalExecs: z.number().int().optional(),
+  uniqueBinaries: z.number().int().optional(),
+  topBinaries: z.array(z.object({ binary: z.string(), count: z.number() })).optional(),
+  totalSyscalls: z.number().int().optional(),
   syscallCounts: z.record(z.string(), z.number()).optional(),
+  totalFileAccess: z.number().int().optional(),
+  fileOpCounts: z.record(z.string(), z.number()).optional(),
+  actionCounts: z.record(z.string(), z.number()).optional(),
 });
 
 const AggregatedTelemetrySchema = z.object({
@@ -135,9 +142,9 @@ export async function POST(request: NextRequest) {
         windowEnd: new Date(summary.windowEnd),
         nodeName: summary.nodeName,
         namespace: summary.namespace,
-        podName: summary.podName,
-        processName: summary.processName,
-        execCount: summary.execCount,
+        podName: summary.podName ?? "",
+        processName: summary.processName ?? "",
+        execCount: summary.execCount ?? summary.totalExecs ?? 0,
         syscallCounts: summary.syscallCounts,
       }));
 

@@ -24,10 +24,11 @@ async function main() {
     scopes: token.scopes,
   });
 
-  // Add simulation scopes if not present
+  // Add simulation and telemetry scopes if not present
   const newScopes = new Set(token.scopes);
   newScopes.add("simulation:read");
   newScopes.add("simulation:write");
+  newScopes.add("telemetry:write");
 
   const updatedScopes = Array.from(newScopes);
 
