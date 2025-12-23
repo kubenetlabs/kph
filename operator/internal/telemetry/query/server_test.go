@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/policy-hub/operator/internal/telemetry/models"
+	"github.com/policy-hub/operator/internal/telemetry/simulation"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
 )
 
@@ -364,5 +366,757 @@ func TestServerStats_Fields(t *testing.T) {
 	}
 	if !stats.Started {
 		t.Error("Started should be true")
+	}
+}
+
+func TestServer_Start_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-start-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start server on random port
+	err = server.Start(ctx, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer server.Stop()
+
+	stats := server.GetStats()
+	if !stats.Started {
+		t.Error("Started should be true after Start()")
+	}
+}
+
+func TestServer_Start_AlreadyStarted(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-start-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = server.Start(ctx, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("First Start() error = %v", err)
+	}
+	defer server.Stop()
+
+	// Second start should fail
+	err = server.Start(ctx, "127.0.0.1:0")
+	if err == nil {
+		t.Error("Second Start() should return error")
+	}
+}
+
+func TestServer_Start_InvalidAddress(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-start-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	err = server.Start(ctx, "invalid-address:99999999")
+	if err == nil {
+		t.Error("Start() with invalid address should return error")
+		server.Stop()
+	}
+}
+
+func TestServer_QueryEvents_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-events-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-2 * time.Hour),
+		EndTime:   now,
+		Limit:     100,
+	}
+
+	// Test that query runs without error and updates stats
+	resp, err := server.QueryEvents(ctx, req)
+	if err != nil {
+		t.Fatalf("QueryEvents() error = %v", err)
+	}
+
+	// Response should be valid (empty is ok for this test)
+	if resp == nil {
+		t.Fatal("QueryEvents() returned nil response")
+	}
+
+	stats := server.GetStats()
+	if stats.TotalQueries != 1 {
+		t.Errorf("TotalQueries = %d, want 1", stats.TotalQueries)
+	}
+	if !stats.LastQueryTime.After(now.Add(-1 * time.Second)) {
+		t.Error("LastQueryTime should be recent")
+	}
+}
+
+func TestServer_QueryEvents_WithFilters(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-events-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Test with namespace filter
+	req := &QueryEventsRequest{
+		StartTime:  now.Add(-2 * time.Hour),
+		EndTime:    now,
+		Namespaces: []string{"default", "production"},
+		EventTypes: []string{"FLOW"},
+		Limit:      100,
+		Offset:     10,
+	}
+
+	resp, err := server.QueryEvents(ctx, req)
+	if err != nil {
+		t.Fatalf("QueryEvents() with filters error = %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("QueryEvents() returned nil response")
+	}
+
+	// Multiple queries should increment counter
+	_, _ = server.QueryEvents(ctx, req)
+	_, _ = server.QueryEvents(ctx, req)
+
+	stats := server.GetStats()
+	if stats.TotalQueries != 3 {
+		t.Errorf("TotalQueries = %d, want 3", stats.TotalQueries)
+	}
+}
+
+func TestServer_GetEventCount_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-count-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &GetEventCountRequest{
+		StartTime:  now.Add(-2 * time.Hour),
+		EndTime:    now,
+		Namespaces: []string{"default"},
+	}
+
+	resp, err := server.GetEventCount(ctx, req)
+	if err != nil {
+		t.Fatalf("GetEventCount() error = %v", err)
+	}
+
+	// Response should have valid structure (counts may be 0 for empty storage)
+	if resp == nil {
+		t.Fatal("GetEventCount() returned nil response")
+	}
+	if resp.EventsByType == nil {
+		t.Error("EventsByType should not be nil")
+	}
+	if resp.EventsByNode == nil {
+		t.Error("EventsByNode should not be nil")
+	}
+}
+
+func TestServer_SimulatePolicy_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &SimulatePolicyRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: frontend
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+`,
+		PolicyType:     "CILIUM_NETWORK",
+		StartTime:      now.Add(-2 * time.Hour),
+		EndTime:        now,
+		Namespaces:     []string{"default"},
+		IncludeDetails: true,
+		MaxDetails:     50,
+	}
+
+	resp, err := server.SimulatePolicy(ctx, req)
+	if err != nil {
+		t.Fatalf("SimulatePolicy() error = %v", err)
+	}
+
+	// Response should be valid (may have 0 flows for empty storage)
+	if resp == nil {
+		t.Fatal("SimulatePolicy() returned nil response")
+	}
+
+	stats := server.GetStats()
+	if stats.TotalSimulations != 1 {
+		t.Errorf("TotalSimulations = %d, want 1", stats.TotalSimulations)
+	}
+	if !stats.LastQueryTime.After(now.Add(-1 * time.Second)) {
+		t.Error("LastQueryTime should be recent")
+	}
+}
+
+func TestServer_SimulatePolicy_InvalidPolicy(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &SimulatePolicyRequest{
+		PolicyContent: "invalid yaml: [",
+		PolicyType:    "CILIUM_NETWORK",
+		StartTime:     now.Add(-2 * time.Hour),
+		EndTime:       now,
+	}
+
+	resp, err := server.SimulatePolicy(ctx, req)
+	// Should return response with error, not fail
+	if err != nil {
+		t.Fatalf("SimulatePolicy() should not return error for invalid policy, got: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("SimulatePolicy() returned nil response")
+	}
+	// Errors should be captured in the response
+	if len(resp.Errors) == 0 {
+		t.Error("Expected errors in response for invalid policy")
+	}
+}
+
+func TestConvertNamespaceBreakdown_NonNil(t *testing.T) {
+	input := map[string]*simulation.NamespaceImpact{
+		"default": {
+			Namespace:    "default",
+			TotalFlows:   100,
+			AllowedCount: 80,
+			DeniedCount:  20,
+			WouldDeny:    10,
+			WouldAllow:   5,
+			NoChange:     85,
+		},
+		"production": {
+			Namespace:    "production",
+			TotalFlows:   200,
+			AllowedCount: 150,
+			DeniedCount:  50,
+			WouldDeny:    25,
+			WouldAllow:   10,
+			NoChange:     165,
+		},
+	}
+
+	result := convertNamespaceBreakdown(input)
+
+	if result == nil {
+		t.Fatal("convertNamespaceBreakdown returned nil for non-nil input")
+	}
+	if len(result) != 2 {
+		t.Errorf("Result length = %d, want 2", len(result))
+	}
+
+	defaultImpact := result["default"]
+	if defaultImpact == nil {
+		t.Fatal("default namespace not found")
+	}
+	if defaultImpact.Namespace != "default" {
+		t.Errorf("Namespace = %s, want default", defaultImpact.Namespace)
+	}
+	if defaultImpact.TotalFlows != 100 {
+		t.Errorf("TotalFlows = %d, want 100", defaultImpact.TotalFlows)
+	}
+	if defaultImpact.AllowedCount != 80 {
+		t.Errorf("AllowedCount = %d, want 80", defaultImpact.AllowedCount)
+	}
+	if defaultImpact.DeniedCount != 20 {
+		t.Errorf("DeniedCount = %d, want 20", defaultImpact.DeniedCount)
+	}
+	if defaultImpact.WouldDeny != 10 {
+		t.Errorf("WouldDeny = %d, want 10", defaultImpact.WouldDeny)
+	}
+	if defaultImpact.WouldAllow != 5 {
+		t.Errorf("WouldAllow = %d, want 5", defaultImpact.WouldAllow)
+	}
+	if defaultImpact.NoChange != 85 {
+		t.Errorf("NoChange = %d, want 85", defaultImpact.NoChange)
+	}
+}
+
+func TestConvertVerdictBreakdown_NonNil(t *testing.T) {
+	input := &simulation.VerdictBreakdown{
+		AllowedToAllowed: 700,
+		AllowedToDenied:  100,
+		DeniedToAllowed:  50,
+		DeniedToDenied:   150,
+		DroppedToAllowed: 25,
+		DroppedToDenied:  75,
+	}
+
+	result := convertVerdictBreakdown(input)
+
+	if result == nil {
+		t.Fatal("convertVerdictBreakdown returned nil for non-nil input")
+	}
+	if result.AllowedToAllowed != 700 {
+		t.Errorf("AllowedToAllowed = %d, want 700", result.AllowedToAllowed)
+	}
+	if result.AllowedToDenied != 100 {
+		t.Errorf("AllowedToDenied = %d, want 100", result.AllowedToDenied)
+	}
+	if result.DeniedToAllowed != 50 {
+		t.Errorf("DeniedToAllowed = %d, want 50", result.DeniedToAllowed)
+	}
+	if result.DeniedToDenied != 150 {
+		t.Errorf("DeniedToDenied = %d, want 150", result.DeniedToDenied)
+	}
+	if result.DroppedToAllowed != 25 {
+		t.Errorf("DroppedToAllowed = %d, want 25", result.DroppedToAllowed)
+	}
+	if result.DroppedToDenied != 75 {
+		t.Errorf("DroppedToDenied = %d, want 75", result.DroppedToDenied)
+	}
+}
+
+func TestConvertFlowDetails_NonNil(t *testing.T) {
+	now := time.Now()
+	input := []*simulation.FlowSimulationResult{
+		{
+			Timestamp:        now,
+			SrcNamespace:     "default",
+			SrcPodName:       "frontend",
+			DstNamespace:     "default",
+			DstPodName:       "backend",
+			DstPort:          8080,
+			Protocol:         "TCP",
+			L7Type:           "HTTP",
+			HTTPMethod:       "GET",
+			HTTPPath:         "/api/users",
+			OriginalVerdict:  "ALLOWED",
+			SimulatedVerdict: "DENIED",
+			VerdictChanged:   true,
+			MatchedRule:      "deny-all",
+			MatchReason:      "No matching ingress rule",
+		},
+		{
+			Timestamp:        now.Add(-1 * time.Hour),
+			SrcNamespace:     "production",
+			SrcPodName:       "api",
+			DstNamespace:     "production",
+			DstPodName:       "db",
+			DstPort:          5432,
+			Protocol:         "TCP",
+			OriginalVerdict:  "ALLOWED",
+			SimulatedVerdict: "ALLOWED",
+			VerdictChanged:   false,
+			MatchedRule:      "allow-db",
+		},
+	}
+
+	result := convertFlowDetails(input)
+
+	if result == nil {
+		t.Fatal("convertFlowDetails returned nil for non-nil input")
+	}
+	if len(result) != 2 {
+		t.Errorf("Result length = %d, want 2", len(result))
+	}
+
+	first := result[0]
+	if first.SrcNamespace != "default" {
+		t.Errorf("SrcNamespace = %s, want default", first.SrcNamespace)
+	}
+	if first.SrcPodName != "frontend" {
+		t.Errorf("SrcPodName = %s, want frontend", first.SrcPodName)
+	}
+	if first.DstPort != 8080 {
+		t.Errorf("DstPort = %d, want 8080", first.DstPort)
+	}
+	if first.Protocol != "TCP" {
+		t.Errorf("Protocol = %s, want TCP", first.Protocol)
+	}
+	if first.L7Type != "HTTP" {
+		t.Errorf("L7Type = %s, want HTTP", first.L7Type)
+	}
+	if first.HTTPMethod != "GET" {
+		t.Errorf("HTTPMethod = %s, want GET", first.HTTPMethod)
+	}
+	if first.HTTPPath != "/api/users" {
+		t.Errorf("HTTPPath = %s, want /api/users", first.HTTPPath)
+	}
+	if !first.VerdictChanged {
+		t.Error("VerdictChanged should be true")
+	}
+	if first.MatchedRule != "deny-all" {
+		t.Errorf("MatchedRule = %s, want deny-all", first.MatchedRule)
+	}
+	if first.MatchReason != "No matching ingress rule" {
+		t.Errorf("MatchReason = %s, want 'No matching ingress rule'", first.MatchReason)
+	}
+
+	second := result[1]
+	if second.VerdictChanged {
+		t.Error("Second result VerdictChanged should be false")
+	}
+}
+
+func TestConvertFlowDetails_Empty(t *testing.T) {
+	input := []*simulation.FlowSimulationResult{}
+	result := convertFlowDetails(input)
+
+	if result == nil {
+		t.Error("convertFlowDetails should return empty slice, not nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("Result length = %d, want 0", len(result))
+	}
+}
+
+func TestServer_UnaryAuthInterceptor_NoAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "",
+		log:    logr.Discard(),
+	}
+
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return "success", nil
+	}
+
+	ctx := context.Background()
+	result, err := server.unaryAuthInterceptor(ctx, nil, nil, handler)
+	if err != nil {
+		t.Errorf("unaryAuthInterceptor() error = %v", err)
+	}
+	if result != "success" {
+		t.Errorf("unaryAuthInterceptor() result = %v, want success", result)
+	}
+}
+
+func TestServer_UnaryAuthInterceptor_ValidAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "test-key",
+		log:    logr.Discard(),
+	}
+
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return "success", nil
+	}
+
+	md := metadata.New(map[string]string{"authorization": "Bearer test-key"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	result, err := server.unaryAuthInterceptor(ctx, nil, nil, handler)
+	if err != nil {
+		t.Errorf("unaryAuthInterceptor() error = %v", err)
+	}
+	if result != "success" {
+		t.Errorf("unaryAuthInterceptor() result = %v, want success", result)
+	}
+}
+
+func TestServer_UnaryAuthInterceptor_InvalidAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "correct-key",
+		log:    logr.Discard(),
+	}
+
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return "success", nil
+	}
+
+	md := metadata.New(map[string]string{"authorization": "Bearer wrong-key"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	_, err := server.unaryAuthInterceptor(ctx, nil, nil, handler)
+	if err == nil {
+		t.Error("unaryAuthInterceptor() should return error for invalid auth")
+	}
+}
+
+// mockServerStream implements grpc.ServerStream for testing
+type mockServerStream struct {
+	ctx context.Context
+}
+
+func (m *mockServerStream) SetHeader(metadata.MD) error  { return nil }
+func (m *mockServerStream) SendHeader(metadata.MD) error { return nil }
+func (m *mockServerStream) SetTrailer(metadata.MD)       {}
+func (m *mockServerStream) Context() context.Context     { return m.ctx }
+func (m *mockServerStream) SendMsg(msg interface{}) error { return nil }
+func (m *mockServerStream) RecvMsg(msg interface{}) error { return nil }
+
+func TestServer_StreamAuthInterceptor_NoAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "",
+		log:    logr.Discard(),
+	}
+
+	handlerCalled := false
+	handler := func(srv interface{}, stream grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	}
+
+	stream := &mockServerStream{ctx: context.Background()}
+	err := server.streamAuthInterceptor(nil, stream, nil, handler)
+	if err != nil {
+		t.Errorf("streamAuthInterceptor() error = %v", err)
+	}
+	if !handlerCalled {
+		t.Error("handler was not called")
+	}
+}
+
+func TestServer_StreamAuthInterceptor_ValidAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "test-key",
+		log:    logr.Discard(),
+	}
+
+	handlerCalled := false
+	handler := func(srv interface{}, stream grpc.ServerStream) error {
+		handlerCalled = true
+		return nil
+	}
+
+	md := metadata.New(map[string]string{"authorization": "Bearer test-key"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	stream := &mockServerStream{ctx: ctx}
+
+	err := server.streamAuthInterceptor(nil, stream, nil, handler)
+	if err != nil {
+		t.Errorf("streamAuthInterceptor() error = %v", err)
+	}
+	if !handlerCalled {
+		t.Error("handler was not called")
+	}
+}
+
+func TestServer_StreamAuthInterceptor_InvalidAuth(t *testing.T) {
+	server := &Server{
+		apiKey: "correct-key",
+		log:    logr.Discard(),
+	}
+
+	handler := func(srv interface{}, stream grpc.ServerStream) error {
+		return nil
+	}
+
+	md := metadata.New(map[string]string{"authorization": "Bearer wrong-key"})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	stream := &mockServerStream{ctx: ctx}
+
+	err := server.streamAuthInterceptor(nil, stream, nil, handler)
+	if err == nil {
+		t.Error("streamAuthInterceptor() should return error for invalid auth")
+	}
+}
+
+func TestServer_Stop_AfterStart(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-stop-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = server.Start(ctx, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	stats := server.GetStats()
+	if !stats.Started {
+		t.Error("Started should be true after Start()")
+	}
+
+	server.Stop()
+
+	stats = server.GetStats()
+	if stats.Started {
+		t.Error("Started should be false after Stop()")
 	}
 }
