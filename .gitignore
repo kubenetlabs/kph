@@ -39,3 +39,4 @@ prisma/migrations
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+operator/collector
