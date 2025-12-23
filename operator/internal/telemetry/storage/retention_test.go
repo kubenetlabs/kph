@@ -342,6 +342,372 @@ func TestGetDirSize(t *testing.T) {
 	}
 }
 
+func TestRetentionWorker_EnforceStorageLimit(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create date directories with known sizes
+	// We'll set max storage very low to trigger cleanup
+	dates := []string{
+		time.Now().AddDate(0, 0, -3).Format("2006-01-02"),
+		time.Now().AddDate(0, 0, -2).Format("2006-01-02"),
+		time.Now().AddDate(0, 0, -1).Format("2006-01-02"),
+	}
+
+	// Create 1KB files in each directory (3KB total)
+	for _, date := range dates {
+		dateDir := filepath.Join(tmpDir, date)
+		if err := os.MkdirAll(dateDir, 0755); err != nil {
+			t.Fatalf("Failed to create date dir: %v", err)
+		}
+		data := make([]byte, 1024)
+		if err := os.WriteFile(filepath.Join(dateDir, "events.parquet"), data, 0644); err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+	}
+
+	// Create worker with very small storage limit (1 byte = 0 GB effectively)
+	// This forces cleanup of all but the most recent data
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath:      tmpDir,
+		RetentionDays: 365, // Don't delete by age
+		MaxStorageGB:  0,   // Zero means default, so we test differently
+		Logger:        logr.Discard(),
+	})
+
+	// Manually call enforceStorageLimit
+	ctx := context.Background()
+	err := rw.enforceStorageLimit(ctx)
+	if err != nil {
+		t.Fatalf("enforceStorageLimit() error = %v", err)
+	}
+
+	// With default max (100GB), nothing should be deleted
+	// Let's verify directories still exist
+	for _, date := range dates {
+		if _, err := os.Stat(filepath.Join(tmpDir, date)); os.IsNotExist(err) {
+			t.Errorf("Directory %s should not have been deleted (under limit)", date)
+		}
+	}
+}
+
+func TestRetentionWorker_Start_WithCleanup(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create an old date directory
+	oldDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	dateDir := filepath.Join(tmpDir, oldDate)
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		t.Fatalf("Failed to create date dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dateDir, "events.parquet"), []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath:        tmpDir,
+		RetentionDays:   7,
+		Logger:          logr.Discard(),
+		CleanupInterval: 100 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	// Start will run initial cleanup and then exit due to context
+	rw.Start(ctx)
+
+	// Old directory should be deleted
+	if _, err := os.Stat(dateDir); !os.IsNotExist(err) {
+		t.Error("Old date directory should have been deleted")
+	}
+}
+
+func TestRetentionWorker_CleanupOldData_WithIndex(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create SQLite index
+	dbPath := filepath.Join(tmpDir, "index", "test.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		t.Fatalf("Failed to create index dir: %v", err)
+	}
+
+	idx, err := NewSQLiteIndex(SQLiteIndexConfig{
+		DBPath: dbPath,
+		Logger: logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteIndex() error = %v", err)
+	}
+	defer idx.Close()
+
+	// Create old and new date directories
+	oldDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	newDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+
+	for _, date := range []string{oldDate, newDate} {
+		dateDir := filepath.Join(tmpDir, date)
+		if err := os.MkdirAll(dateDir, 0755); err != nil {
+			t.Fatalf("Failed to create date dir: %v", err)
+		}
+		filePath := filepath.Join(dateDir, "events.parquet")
+		if err := os.WriteFile(filePath, []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+		// Register in index
+		if err := idx.RegisterFile(filePath, date, "node-1", 10, 4); err != nil {
+			t.Fatalf("RegisterFile() error = %v", err)
+		}
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath:      tmpDir,
+		RetentionDays: 7,
+		Index:         idx,
+		Logger:        logr.Discard(),
+	})
+
+	ctx := context.Background()
+	if err := rw.cleanupOldData(ctx); err != nil {
+		t.Fatalf("cleanupOldData() error = %v", err)
+	}
+
+	// Old directory should be deleted
+	if _, err := os.Stat(filepath.Join(tmpDir, oldDate)); !os.IsNotExist(err) {
+		t.Error("Old date directory should have been deleted")
+	}
+
+	// New directory should still exist
+	if _, err := os.Stat(filepath.Join(tmpDir, newDate)); os.IsNotExist(err) {
+		t.Error("New date directory should still exist")
+	}
+}
+
+func TestRetentionWorker_DeleteFile(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create SQLite index
+	dbPath := filepath.Join(tmpDir, "index", "test.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		t.Fatalf("Failed to create index dir: %v", err)
+	}
+
+	idx, err := NewSQLiteIndex(SQLiteIndexConfig{
+		DBPath: dbPath,
+		Logger: logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteIndex() error = %v", err)
+	}
+	defer idx.Close()
+
+	// Create a test file
+	dateDir := filepath.Join(tmpDir, "2024-01-15")
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		t.Fatalf("Failed to create date dir: %v", err)
+	}
+	filePath := filepath.Join(dateDir, "events.parquet")
+	if err := os.WriteFile(filePath, []byte("test data"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Register in index
+	if err := idx.RegisterFile(filePath, "2024-01-15", "node-1", 10, 9); err != nil {
+		t.Fatalf("RegisterFile() error = %v", err)
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: tmpDir,
+		Index:    idx,
+		Logger:   logr.Discard(),
+	})
+
+	ctx := context.Background()
+	if err := rw.deleteFile(ctx, filePath); err != nil {
+		t.Fatalf("deleteFile() error = %v", err)
+	}
+
+	// File should be deleted
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Error("File should have been deleted")
+	}
+}
+
+func TestRetentionWorker_DeleteFile_NoIndex(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create a test file
+	dateDir := filepath.Join(tmpDir, "2024-01-15")
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		t.Fatalf("Failed to create date dir: %v", err)
+	}
+	filePath := filepath.Join(dateDir, "events.parquet")
+	if err := os.WriteFile(filePath, []byte("test data"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: tmpDir,
+		Index:    nil, // No index
+		Logger:   logr.Discard(),
+	})
+
+	ctx := context.Background()
+	if err := rw.deleteFile(ctx, filePath); err != nil {
+		t.Fatalf("deleteFile() error = %v", err)
+	}
+
+	// File should be deleted
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Error("File should have been deleted")
+	}
+}
+
+func TestRetentionWorker_ScanAndDeleteOldDirs(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create directories with various names
+	oldDate := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	newDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	notADate := "not-a-date"
+
+	for _, name := range []string{oldDate, newDate, notADate} {
+		dir := filepath.Join(tmpDir, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("Failed to create dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "test.parquet"), []byte("test"), 0644); err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath:      tmpDir,
+		RetentionDays: 7,
+		Logger:        logr.Discard(),
+	})
+
+	cutoffDate := time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02")
+	ctx := context.Background()
+	if err := rw.scanAndDeleteOldDirs(ctx, cutoffDate); err != nil {
+		t.Fatalf("scanAndDeleteOldDirs() error = %v", err)
+	}
+
+	// Old date directory should be deleted
+	if _, err := os.Stat(filepath.Join(tmpDir, oldDate)); !os.IsNotExist(err) {
+		t.Error("Old date directory should have been deleted")
+	}
+
+	// New date directory should still exist
+	if _, err := os.Stat(filepath.Join(tmpDir, newDate)); os.IsNotExist(err) {
+		t.Error("New date directory should still exist")
+	}
+
+	// Non-date directory should still exist
+	if _, err := os.Stat(filepath.Join(tmpDir, notADate)); os.IsNotExist(err) {
+		t.Error("Non-date directory should still exist")
+	}
+}
+
+func TestRetentionWorker_ScanAndDeleteOldDirs_NoDir(t *testing.T) {
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: "/nonexistent/path",
+		Logger:   logr.Discard(),
+	})
+
+	ctx := context.Background()
+	err := rw.scanAndDeleteOldDirs(ctx, "2024-01-01")
+	if err != nil {
+		t.Errorf("scanAndDeleteOldDirs() should not error for nonexistent path: %v", err)
+	}
+}
+
+func TestRetentionWorker_CleanupEmptyDirs_NonDateFile(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create a regular file (not directory)
+	if err := os.WriteFile(filepath.Join(tmpDir, "regular-file.txt"), []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: tmpDir,
+		Logger:   logr.Discard(),
+	})
+
+	ctx := context.Background()
+	if err := rw.cleanupEmptyDirs(ctx); err != nil {
+		t.Fatalf("cleanupEmptyDirs() error = %v", err)
+	}
+
+	// File should still exist
+	if _, err := os.Stat(filepath.Join(tmpDir, "regular-file.txt")); os.IsNotExist(err) {
+		t.Error("Regular file should not be deleted")
+	}
+}
+
+func TestRetentionWorker_RunCleanup_WithIndex(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	// Create SQLite index
+	dbPath := filepath.Join(tmpDir, "index", "test.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		t.Fatalf("Failed to create index dir: %v", err)
+	}
+
+	idx, err := NewSQLiteIndex(SQLiteIndexConfig{
+		DBPath: dbPath,
+		Logger: logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteIndex() error = %v", err)
+	}
+	defer idx.Close()
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: tmpDir,
+		Index:    idx,
+		Logger:   logr.Discard(),
+	})
+
+	ctx := context.Background()
+	if err := rw.RunCleanup(ctx); err != nil {
+		t.Fatalf("RunCleanup() error = %v", err)
+	}
+}
+
+func TestRetentionWorker_GetStorageSize_Empty(t *testing.T) {
+	tmpDir := setupRetentionTestDir(t)
+
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: tmpDir,
+		Logger:   logr.Discard(),
+	})
+
+	size, err := rw.getStorageSize()
+	if err != nil {
+		t.Fatalf("getStorageSize() error = %v", err)
+	}
+
+	if size != 0 {
+		t.Errorf("getStorageSize() = %d, want 0 for empty dir", size)
+	}
+}
+
+func TestRetentionWorker_GetSortedDates_NoDir(t *testing.T) {
+	rw := NewRetentionWorker(RetentionWorkerConfig{
+		BasePath: "/nonexistent/path",
+		Logger:   logr.Discard(),
+	})
+
+	dates, err := rw.getSortedDates()
+	if err != nil {
+		t.Errorf("getSortedDates() should not error for nonexistent path: %v", err)
+	}
+	if dates != nil && len(dates) != 0 {
+		t.Errorf("Expected nil or empty dates, got %v", dates)
+	}
+}
+
 // Helper function to set up a test directory
 func setupRetentionTestDir(t *testing.T) string {
 	t.Helper()

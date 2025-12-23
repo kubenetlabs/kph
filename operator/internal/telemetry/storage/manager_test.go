@@ -410,3 +410,331 @@ func TestManager_GetReader(t *testing.T) {
 		t.Error("GetReader() returned nil")
 	}
 }
+
+func TestManager_Query_EmptyResult(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	defer mgr.Close()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Query without any data
+	result, err := mgr.Query(ctx, models.QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now,
+	})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+
+	if len(result.Events) != 0 {
+		t.Errorf("Expected 0 events, got %d", len(result.Events))
+	}
+}
+
+func TestManager_Query_WithEventTypeFilter(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	events := []*models.TelemetryEvent{
+		{ID: "1", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+		{ID: "2", Timestamp: now, EventType: models.EventTypeProcessExec, SrcNamespace: "default"},
+		{ID: "3", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "production"},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Create a new reader to verify event type filtering works
+	parquetPath := filepath.Join(tmpDir, "parquet")
+	reader := NewParquetReader(parquetPath, logr.Discard())
+
+	ctx := context.Background()
+	result, err := reader.ReadEvents(ctx, models.QueryEventsRequest{
+		StartTime:  now.Add(-1 * time.Hour),
+		EndTime:    now.Add(1 * time.Hour),
+		EventTypes: []string{string(models.EventTypeFlow)},
+	})
+	if err != nil {
+		t.Fatalf("ReadEvents() error = %v", err)
+	}
+
+	if len(result.Events) != 2 {
+		t.Errorf("ReadEvents(eventType=FLOW) returned %d events, want 2", len(result.Events))
+	}
+}
+
+func TestManager_Write_MultipleWrites(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Multiple writes
+	for i := 0; i < 5; i++ {
+		events := []*models.TelemetryEvent{
+			{
+				ID:           "event-" + string(rune('a'+i)),
+				Timestamp:    now,
+				EventType:    models.EventTypeFlow,
+				NodeName:     "test-node",
+				SrcNamespace: "default",
+			},
+		}
+		if err := mgr.Write(events); err != nil {
+			t.Fatalf("Write() iteration %d error = %v", i, err)
+		}
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Verify all events were written
+	parquetPath := filepath.Join(tmpDir, "parquet")
+	reader := NewParquetReader(parquetPath, logr.Discard())
+
+	ctx := context.Background()
+	result, err := reader.ReadEvents(ctx, models.QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReadEvents() error = %v", err)
+	}
+
+	if len(result.Events) != 5 {
+		t.Errorf("Expected 5 events, got %d", len(result.Events))
+	}
+}
+
+func TestManager_Write_WithAllEventTypes(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	events := []*models.TelemetryEvent{
+		{ID: "1", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default", Verdict: models.VerdictAllowed},
+		{ID: "2", Timestamp: now, EventType: models.EventTypeProcessExec, SrcNamespace: "default", SrcProcess: "/bin/bash"},
+		{ID: "3", Timestamp: now, EventType: models.EventTypeSyscall, SrcNamespace: "default", Syscall: "open"},
+		{ID: "4", Timestamp: now, EventType: models.EventTypeFileAccess, SrcNamespace: "default", FilePath: "/etc/passwd"},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	parquetPath := filepath.Join(tmpDir, "parquet")
+	reader := NewParquetReader(parquetPath, logr.Discard())
+
+	ctx := context.Background()
+	result, err := reader.ReadEvents(ctx, models.QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReadEvents() error = %v", err)
+	}
+
+	if len(result.Events) != 4 {
+		t.Errorf("Expected 4 events, got %d", len(result.Events))
+	}
+}
+
+func TestManager_Write_WithL7Data(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "http-1",
+			Timestamp:    now,
+			EventType:    models.EventTypeFlow,
+			SrcNamespace: "default",
+			DstNamespace: "production",
+			Protocol:     "TCP",
+			L7Type:       "HTTP",
+			HTTPMethod:   "GET",
+			HTTPPath:     "/api/users",
+			HTTPStatus:   200,
+			Verdict:      models.VerdictAllowed,
+		},
+		{
+			ID:           "dns-1",
+			Timestamp:    now,
+			EventType:    models.EventTypeFlow,
+			SrcNamespace: "default",
+			Protocol:     "UDP",
+			L7Type:       "DNS",
+			DNSQuery:     "example.com",
+			Verdict:      models.VerdictAllowed,
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	parquetPath := filepath.Join(tmpDir, "parquet")
+	reader := NewParquetReader(parquetPath, logr.Discard())
+
+	ctx := context.Background()
+	result, err := reader.ReadEvents(ctx, models.QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReadEvents() error = %v", err)
+	}
+
+	if len(result.Events) != 2 {
+		t.Errorf("Expected 2 events, got %d", len(result.Events))
+	}
+
+	// Verify L7 data was preserved
+	for _, event := range result.Events {
+		if event.ID == "http-1" {
+			if event.HTTPMethod != "GET" {
+				t.Errorf("HTTPMethod = %s, want GET", event.HTTPMethod)
+			}
+			if event.HTTPPath != "/api/users" {
+				t.Errorf("HTTPPath = %s, want /api/users", event.HTTPPath)
+			}
+		}
+		if event.ID == "dns-1" {
+			if event.DNSQuery != "example.com" {
+				t.Errorf("DNSQuery = %s, want example.com", event.DNSQuery)
+			}
+		}
+	}
+}
+
+func TestManager_Query_WithLimit(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := NewManager(ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	events := []*models.TelemetryEvent{
+		{ID: "1", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+		{ID: "2", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+		{ID: "3", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+		{ID: "4", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+		{ID: "5", Timestamp: now, EventType: models.EventTypeFlow, SrcNamespace: "default"},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	parquetPath := filepath.Join(tmpDir, "parquet")
+	reader := NewParquetReader(parquetPath, logr.Discard())
+
+	ctx := context.Background()
+	result, err := reader.ReadEvents(ctx, models.QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+		Limit:     3,
+	})
+	if err != nil {
+		t.Fatalf("ReadEvents() error = %v", err)
+	}
+
+	if len(result.Events) != 3 {
+		t.Errorf("Expected 3 events with limit, got %d", len(result.Events))
+	}
+	if !result.HasMore {
+		t.Error("Expected HasMore to be true")
+	}
+}
