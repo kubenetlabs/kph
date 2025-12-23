@@ -139,11 +139,18 @@ model Cluster {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // Telemetry tracking
+  lastTelemetryAt  DateTime?
+
   // Relationships
-  policies    Policy[]
-  flowRecords FlowRecord[]
-  simulations Simulation[]
-  apiTokens   ApiToken[]
+  policies          Policy[]
+  flowRecords       FlowRecord[]
+  simulations       Simulation[]
+  apiTokens         ApiToken[]
+  flowSummaries     FlowSummary[]
+  processSummaries  ProcessSummary[]
+  policySimulations PolicySimulation[]
+  notifications     Notification[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -421,4 +428,129 @@ model ApiToken {
   @@index([tokenHash])
   @@index([clusterId])
   @@map("api_tokens")
+}
+
+// ============================================================================
+// TELEMETRY AGGREGATES (From Operator)
+// ============================================================================
+
+model FlowSummary {
+  id              String   @id @default(cuid())
+  clusterId       String
+  timestamp       DateTime
+  windowStart     DateTime
+  windowEnd       DateTime
+  nodeName        String
+  srcNamespace    String
+  dstNamespace    String
+  srcPodName      String?
+  dstPodName      String?
+  dstPort         Int
+  protocol        String
+  l7Type          String?
+  totalFlows      BigInt
+  allowedFlows    BigInt
+  deniedFlows     BigInt
+  droppedFlows    BigInt
+  totalBytes      BigInt
+  totalPackets    BigInt
+  httpMethodCounts Json?   // Record<string, number>
+  httpStatusCounts Json?   // Record<number, number>
+  topHttpPaths     Json?   // Array<{path, count}>
+  topDnsQueries    Json?   // Array<{query, count}>
+  createdAt       DateTime @default(now())
+
+  cluster         Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, timestamp])
+  @@index([clusterId, srcNamespace, dstNamespace])
+  @@index([windowStart, windowEnd])
+  @@map("flow_summaries")
+}
+
+model ProcessSummary {
+  id              String   @id @default(cuid())
+  clusterId       String
+  timestamp       DateTime
+  windowStart     DateTime
+  windowEnd       DateTime
+  nodeName        String
+  namespace       String
+  podName         String
+  processName     String
+  execCount       Int
+  syscallCounts   Json?    // Record<string, number>
+  createdAt       DateTime @default(now())
+
+  cluster         Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, timestamp])
+  @@index([clusterId, namespace])
+  @@map("process_summaries")
+}
+
+// ============================================================================
+// POLICY SIMULATIONS (Operator-Initiated)
+// ============================================================================
+
+model PolicySimulation {
+  id                    String    @id @default(cuid())
+  clusterId             String
+  policyContent         String    @db.Text
+  policyType            String    // CILIUM_NETWORK, CILIUM_CLUSTERWIDE, etc.
+  status                String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, COMPLETED_WITH_ERRORS, FAILED
+
+  // Query parameters
+  startTime             DateTime
+  endTime               DateTime
+  namespaces            Json?     // string[]
+  includeDetails        Boolean   @default(false)
+  maxDetails            Int       @default(100)
+
+  // Results
+  totalFlowsAnalyzed    BigInt?
+  allowedCount          BigInt?
+  deniedCount           BigInt?
+  noChangeCount         BigInt?
+  wouldChangeCount      BigInt?
+  breakdownByNamespace  Json?     // Record<string, NSImpact>
+  breakdownByVerdict    Json?     // VerdictBreakdown
+  sampleFlows           Json?     // SimulatedFlow[]
+  errors                Json?     // string[]
+  durationNs            BigInt?   // Duration in nanoseconds
+
+  // Timestamps
+  requestedAt           DateTime  @default(now())
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  cluster               Cluster   @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, status])
+  @@index([clusterId, requestedAt])
+  @@index([status])
+  @@map("policy_simulations")
+}
+
+// ============================================================================
+// NOTIFICATIONS (For UI Alerts)
+// ============================================================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  clusterId   String
+  type        String   // SIMULATION_COMPLETE, POLICY_DEPLOYED, etc.
+  title       String
+  message     String
+  metadata    Json?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, read])
+  @@index([clusterId, createdAt])
+  @@map("notifications")
 }
