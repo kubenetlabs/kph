@@ -21,6 +21,7 @@ import (
 	"github.com/policy-hub/operator/internal/telemetry/aggregator"
 	"github.com/policy-hub/operator/internal/telemetry/collector"
 	"github.com/policy-hub/operator/internal/telemetry/models"
+	"github.com/policy-hub/operator/internal/telemetry/query"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
 )
 
@@ -33,6 +34,7 @@ const (
 	defaultRetentionDays      = 7
 	defaultHealthPort         = 8080
 	defaultMetricsPort        = 9090
+	defaultQueryPort          = 9091
 )
 
 // Config holds the collector configuration.
@@ -67,6 +69,11 @@ type Config struct {
 	// Server configuration
 	HealthPort  int
 	MetricsPort int
+	QueryPort   int
+
+	// Query API configuration
+	QueryEnabled bool
+	QueryAPIKey  string
 
 	// Namespace filtering
 	NamespaceFilter []string
@@ -123,6 +130,30 @@ func main() {
 	if err := storageMgr.Start(ctx); err != nil {
 		log.Error(err, "Failed to start storage manager")
 		os.Exit(1)
+	}
+
+	// Initialize and start query server for SaaS→Collector queries
+	var queryServer *query.Server
+	if cfg.QueryEnabled {
+		queryServer = query.NewServer(query.ServerConfig{
+			StorageManager: storageMgr,
+			APIKey:         cfg.QueryAPIKey,
+			Logger:         log,
+		})
+
+		queryAddress := fmt.Sprintf(":%d", cfg.QueryPort)
+		if err := queryServer.Start(ctx, queryAddress); err != nil {
+			log.Error(err, "Failed to start query server")
+			os.Exit(1)
+		}
+		defer queryServer.Stop()
+
+		log.Info("Query server enabled",
+			"port", cfg.QueryPort,
+			"authenticated", cfg.QueryAPIKey != "",
+		)
+	} else {
+		log.Info("Query server disabled")
 	}
 
 	// Initialize ring buffer
@@ -234,7 +265,7 @@ func main() {
 	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
 
 	// Start metrics server
-	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, log)
+	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, queryServer, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -294,6 +325,11 @@ func parseFlags() *Config {
 	// Server flags
 	flag.IntVar(&cfg.HealthPort, "health-port", getEnvInt("HEALTH_PORT", defaultHealthPort), "Health check port")
 	flag.IntVar(&cfg.MetricsPort, "metrics-port", getEnvInt("METRICS_PORT", defaultMetricsPort), "Metrics port")
+	flag.IntVar(&cfg.QueryPort, "query-port", getEnvInt("QUERY_PORT", defaultQueryPort), "Query API gRPC port")
+
+	// Query API flags
+	flag.BoolVar(&cfg.QueryEnabled, "query-enabled", getEnvBool("QUERY_ENABLED", true), "Enable query API server")
+	flag.StringVar(&cfg.QueryAPIKey, "query-api-key", getEnv("QUERY_API_KEY", ""), "API key for query authentication (empty = no auth)")
 
 	// Logging
 	flag.StringVar(&cfg.LogLevel, "log-level", getEnv("LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
@@ -430,7 +466,7 @@ func startHealthServer(port int, buffer *collector.RingBuffer, storageMgr *stora
 	}
 }
 
-func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, log logr.Logger) {
+func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, queryServer *query.Server, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -515,6 +551,30 @@ func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *stor
 				fmt.Fprintf(w, "policyhub_collector_saas_last_send_success 1\n")
 			} else {
 				fmt.Fprintf(w, "policyhub_collector_saas_last_send_success 0\n")
+			}
+		}
+
+		// Query server metrics
+		if queryServer != nil {
+			queryStats := queryServer.GetStats()
+			fmt.Fprintf(w, "# HELP policyhub_collector_query_total Total queries received\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_query_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_query_total %d\n", queryStats.TotalQueries)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_query_events_total Total events returned by queries\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_query_events_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_query_events_total %d\n", queryStats.TotalEvents)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_query_errors_total Total query errors\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_query_errors_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_query_errors_total %d\n", queryStats.QueryErrors)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_query_server_started Query server running (1=yes, 0=no)\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_query_server_started gauge\n")
+			if queryStats.Started {
+				fmt.Fprintf(w, "policyhub_collector_query_server_started 1\n")
+			} else {
+				fmt.Fprintf(w, "policyhub_collector_query_server_started 0\n")
 			}
 		}
 	})
