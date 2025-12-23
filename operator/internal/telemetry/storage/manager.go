@@ -82,6 +82,15 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	// Initialize Parquet reader
 	reader := NewParquetReader(parquetPath, cfg.Logger)
 
+	// Set up the skip files function to avoid reading files being written
+	reader.SetSkipFilesFunc(func() []string {
+		currentFile := writer.GetCurrentFilePath()
+		if currentFile != "" {
+			return []string{currentFile}
+		}
+		return nil
+	})
+
 	// Initialize retention worker
 	retention := NewRetentionWorker(RetentionWorkerConfig{
 		BasePath:      parquetPath,

@@ -156,92 +156,296 @@ func (e *Engine) evaluateFlow(event *models.TelemetryEvent, policy *ParsedPolicy
 		OriginalVerdict: string(event.Verdict),
 	}
 
-	// Check if the flow's source matches the policy's pod selector
-	if !e.matchesPodSelector(event, policy) {
-		// Flow source doesn't match this policy, use original verdict
-		result.SimulatedVerdict = result.OriginalVerdict
-		result.MatchReason = "Source pod does not match policy selector"
-		result.VerdictChanged = false
-		return result
-	}
+	// CiliumNetworkPolicy semantics:
+	// - endpointSelector selects which pods the policy applies TO
+	// - For ingress rules: the selected pods are the DESTINATION, rules filter SOURCE
+	// - For egress rules: the selected pods are the SOURCE, rules filter DESTINATION
+	//
+	// We need to evaluate the flow against both ingress and egress rules:
+	// - Ingress: if DST matches endpointSelector, check if SRC is allowed by ingress rules
+	// - Egress: if SRC matches endpointSelector, check if DST is allowed by egress rules
 
-	// Determine if this is ingress or egress from policy's perspective
-	// For flows where source matches policy selector, outbound = egress, inbound = ingress
-	direction := "egress"
-	if event.Direction == models.TrafficDirectionIngress {
-		direction = "ingress"
-	}
-
-	// Get the relevant rules
-	var rules []PolicyRule
-	if direction == "ingress" {
-		rules = policy.IngressRules
-	} else {
-		rules = policy.EgressRules
-	}
-
-	// If no rules for this direction and policy has default deny, deny the flow
-	if len(rules) == 0 {
-		if policy.DefaultDeny && (policy.DefaultDenyType == direction || policy.DefaultDenyType == "both") {
-			result.SimulatedVerdict = "DENIED"
-			result.MatchReason = "Default deny, no matching rules"
-		} else {
-			result.SimulatedVerdict = "ALLOWED"
-			result.MatchReason = "No policy rules apply"
+	// Check ingress rules (policy applies to destination pod)
+	if len(policy.IngressRules) > 0 || policy.DefaultDenyType == "ingress" || policy.DefaultDenyType == "both" {
+		if e.matchesPodSelectorForDirection(event, policy, "ingress") {
+			// Destination matches policy selector, evaluate ingress rules
+			ingressResult := e.evaluateIngressRules(event, policy, result)
+			if ingressResult != nil {
+				return ingressResult
+			}
 		}
-		result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
-		return result
 	}
 
-	// Check if any rule allows this flow
+	// Check egress rules (policy applies to source pod)
+	if len(policy.EgressRules) > 0 || policy.DefaultDenyType == "egress" || policy.DefaultDenyType == "both" {
+		if e.matchesPodSelectorForDirection(event, policy, "egress") {
+			// Source matches policy selector, evaluate egress rules
+			egressResult := e.evaluateEgressRules(event, policy, result)
+			if egressResult != nil {
+				return egressResult
+			}
+		}
+	}
+
+	// Policy doesn't apply to this flow
+	result.SimulatedVerdict = result.OriginalVerdict
+	result.MatchReason = "Policy does not apply to this flow"
+	result.VerdictChanged = false
+	return result
+}
+
+// evaluateIngressRules evaluates ingress rules where destination matches the policy selector.
+func (e *Engine) evaluateIngressRules(event *models.TelemetryEvent, policy *ParsedPolicy, result *FlowSimulationResult) *FlowSimulationResult {
+	rules := policy.IngressRules
+
+	// If no ingress rules but default deny is enabled for ingress
+	if len(rules) == 0 {
+		if policy.DefaultDeny && (policy.DefaultDenyType == "ingress" || policy.DefaultDenyType == "both") {
+			result.SimulatedVerdict = "DENIED"
+			result.MatchReason = "Default deny ingress, no rules defined"
+			result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
+			return result
+		}
+		return nil // No ingress rules and no default deny
+	}
+
+	// Check if any ingress rule allows this flow
 	for i, rule := range rules {
-		if e.flowMatchesRule(event, &rule) {
+		if e.flowMatchesIngressRule(event, &rule) {
 			if rule.Action == "allow" {
 				result.SimulatedVerdict = "ALLOWED"
 				result.MatchedRule = ruleDescription(i, &rule)
-				result.MatchReason = "Matched allow rule"
+				result.MatchReason = "Matched ingress allow rule"
 			} else {
 				result.SimulatedVerdict = "DENIED"
 				result.MatchedRule = ruleDescription(i, &rule)
-				result.MatchReason = "Matched deny rule"
+				result.MatchReason = "Matched ingress deny rule"
 			}
 			result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
 			return result
 		}
 	}
 
-	// No rule matched - apply default deny if enabled
+	// No ingress rule matched - apply default deny
 	if policy.DefaultDeny {
 		result.SimulatedVerdict = "DENIED"
-		result.MatchReason = "No matching rule, default deny"
-	} else {
-		result.SimulatedVerdict = "ALLOWED"
-		result.MatchReason = "No matching rule, default allow"
+		result.MatchReason = "No matching ingress rule, default deny"
+		result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
+		return result
 	}
 
-	result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
-	return result
+	return nil
+}
+
+// evaluateEgressRules evaluates egress rules where source matches the policy selector.
+func (e *Engine) evaluateEgressRules(event *models.TelemetryEvent, policy *ParsedPolicy, result *FlowSimulationResult) *FlowSimulationResult {
+	rules := policy.EgressRules
+
+	// If no egress rules but default deny is enabled for egress
+	if len(rules) == 0 {
+		if policy.DefaultDeny && (policy.DefaultDenyType == "egress" || policy.DefaultDenyType == "both") {
+			result.SimulatedVerdict = "DENIED"
+			result.MatchReason = "Default deny egress, no rules defined"
+			result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
+			return result
+		}
+		return nil // No egress rules and no default deny
+	}
+
+	// Check if any egress rule allows this flow
+	for i, rule := range rules {
+		if e.flowMatchesEgressRule(event, &rule) {
+			if rule.Action == "allow" {
+				result.SimulatedVerdict = "ALLOWED"
+				result.MatchedRule = ruleDescription(i, &rule)
+				result.MatchReason = "Matched egress allow rule"
+			} else {
+				result.SimulatedVerdict = "DENIED"
+				result.MatchedRule = ruleDescription(i, &rule)
+				result.MatchReason = "Matched egress deny rule"
+			}
+			result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
+			return result
+		}
+	}
+
+	// No egress rule matched - apply default deny
+	if policy.DefaultDeny {
+		result.SimulatedVerdict = "DENIED"
+		result.MatchReason = "No matching egress rule, default deny"
+		result.VerdictChanged = result.SimulatedVerdict != result.OriginalVerdict
+		return result
+	}
+
+	return nil
 }
 
 // matchesPodSelector checks if an event's source matches the policy's pod selector.
+// This is a legacy method that checks source labels only.
+// For proper direction-aware matching, use matchesPodSelectorForDirection.
 func (e *Engine) matchesPodSelector(event *models.TelemetryEvent, policy *ParsedPolicy) bool {
+	return e.matchesPodSelectorForDirection(event, policy, "egress")
+}
+
+// matchesPodSelectorForDirection checks if the appropriate pod matches the policy selector.
+// For ingress: checks destination pod (policy applies to destination)
+// For egress: checks source pod (policy applies to source)
+func (e *Engine) matchesPodSelectorForDirection(event *models.TelemetryEvent, policy *ParsedPolicy, direction string) bool {
+	var namespace string
+	var labels map[string]string
+
+	if direction == "ingress" {
+		// For ingress rules, policy applies to destination pod
+		namespace = event.DstNamespace
+		labels = event.DstPodLabels
+	} else {
+		// For egress rules, policy applies to source pod
+		namespace = event.SrcNamespace
+		labels = event.SrcPodLabels
+	}
+
 	// Empty selector matches all pods
 	if len(policy.PodSelector) == 0 {
+		// But still need to match namespace if specified
+		if policy.Namespace != "" && namespace != policy.Namespace {
+			return false
+		}
 		return true
 	}
 
 	// Check if namespace matches (if policy is namespaced)
-	if policy.Namespace != "" && event.SrcNamespace != policy.Namespace {
+	if policy.Namespace != "" && namespace != policy.Namespace {
 		return false
 	}
 
-	// Check pod labels
-	if event.SrcPodLabels == nil {
-		return false
+	// Check pod labels using the labelsMatch helper that handles k8s: prefix
+	return labelsMatch(labels, policy.PodSelector)
+}
+
+// flowMatchesIngressRule checks if a flow matches an ingress rule.
+// For ingress rules, we check if the SOURCE pod/namespace matches the rule's fromEndpoints selector.
+func (e *Engine) flowMatchesIngressRule(event *models.TelemetryEvent, rule *PolicyRule) bool {
+	// Check fromEndpoints selector (matches source pod for ingress)
+	// Use labelsMatch to handle both normalized and k8s:-prefixed labels
+	if len(rule.PodSelector) > 0 {
+		if !labelsMatch(event.SrcPodLabels, rule.PodSelector) {
+			return false
+		}
 	}
 
-	for key, value := range policy.PodSelector {
-		if event.SrcPodLabels[key] != value {
+	// Check namespace selector for source
+	if len(rule.NamespaceSelector) > 0 {
+		if nsName, ok := rule.NamespaceSelector["name"]; ok {
+			if event.SrcNamespace != nsName {
+				return false
+			}
+		}
+	}
+
+	// Check ports (destination ports for ingress)
+	if len(rule.ToPorts) > 0 {
+		portMatched := false
+		for _, portRule := range rule.ToPorts {
+			if e.portMatches(event, &portRule) {
+				portMatched = true
+				break
+			}
+		}
+		if !portMatched {
+			return false
+		}
+	}
+
+	// Check L7 rules if present
+	if len(rule.L7Rules) > 0 {
+		l7Matched := false
+		for _, l7Rule := range rule.L7Rules {
+			if e.l7Matches(event, &l7Rule) {
+				l7Matched = true
+				break
+			}
+		}
+		if !l7Matched {
+			return false
+		}
+	}
+
+	// Check fromCIDR rules
+	if len(rule.FromCIDRs) > 0 {
+		// For CIDR matching, we'd need to check if source IP is in the CIDR range
+		// Simplified: skip for now
+	}
+
+	return true
+}
+
+// flowMatchesEgressRule checks if a flow matches an egress rule.
+// For egress rules, we check if the DESTINATION pod/namespace matches the rule's toEndpoints selector.
+func (e *Engine) flowMatchesEgressRule(event *models.TelemetryEvent, rule *PolicyRule) bool {
+	// Check toEndpoints selector (matches destination pod for egress)
+	// Use labelsMatch to handle both normalized and k8s:-prefixed labels
+	if len(rule.PodSelector) > 0 {
+		if !labelsMatch(event.DstPodLabels, rule.PodSelector) {
+			return false
+		}
+	}
+
+	// Check namespace selector for destination
+	if len(rule.NamespaceSelector) > 0 {
+		if nsName, ok := rule.NamespaceSelector["name"]; ok {
+			if event.DstNamespace != nsName {
+				return false
+			}
+		}
+	}
+
+	// Check ports (destination ports for egress)
+	if len(rule.ToPorts) > 0 {
+		portMatched := false
+		for _, portRule := range rule.ToPorts {
+			if e.portMatches(event, &portRule) {
+				portMatched = true
+				break
+			}
+		}
+		if !portMatched {
+			return false
+		}
+	}
+
+	// Check L7 rules if present
+	if len(rule.L7Rules) > 0 {
+		l7Matched := false
+		for _, l7Rule := range rule.L7Rules {
+			if e.l7Matches(event, &l7Rule) {
+				l7Matched = true
+				break
+			}
+		}
+		if !l7Matched {
+			return false
+		}
+	}
+
+	// Check toCIDR rules
+	if len(rule.ToCIDRs) > 0 {
+		// For CIDR matching, we'd need to check if dest IP is in the CIDR range
+		// Simplified: skip for now
+	}
+
+	// Check FQDN rules
+	if len(rule.ToFQDNs) > 0 {
+		if event.DstDNSName == "" {
+			return false
+		}
+		fqdnMatched := false
+		for _, pattern := range rule.ToFQDNs {
+			if matchFQDN(event.DstDNSName, pattern) {
+				fqdnMatched = true
+				break
+			}
+		}
+		if !fqdnMatched {
 			return false
 		}
 	}
@@ -407,6 +611,35 @@ func matchFQDN(hostname, pattern string) bool {
 		return strings.HasSuffix(hostname, suffix)
 	}
 	return hostname == pattern
+}
+
+// getLabelValue retrieves a label value from a map, handling Cilium's k8s: prefix.
+// It tries both the bare key (e.g., "org") and the prefixed key (e.g., "k8s:org")
+// to support both normalized labels and legacy data.
+func getLabelValue(labels map[string]string, key string) (string, bool) {
+	// Try the bare key first (normalized format)
+	if value, ok := labels[key]; ok {
+		return value, true
+	}
+	// Try with k8s: prefix (legacy format)
+	if value, ok := labels["k8s:"+key]; ok {
+		return value, true
+	}
+	return "", false
+}
+
+// labelsMatch checks if a label map contains all required key-value pairs.
+// Handles both normalized labels and legacy Cilium-prefixed labels.
+func labelsMatch(labels map[string]string, required map[string]string) bool {
+	if labels == nil && len(required) > 0 {
+		return false
+	}
+	for key, reqValue := range required {
+		if value, ok := getLabelValue(labels, key); !ok || value != reqValue {
+			return false
+		}
+	}
+	return true
 }
 
 // ruleDescription creates a human-readable description of a rule.

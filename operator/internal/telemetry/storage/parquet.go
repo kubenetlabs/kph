@@ -122,10 +122,11 @@ type ParquetWriter struct {
 	mu          sync.Mutex
 
 	// Current file state
-	currentDate   string
-	currentWriter *writer.ParquetWriter
-	currentFile   *os.File
-	eventCount    int64
+	currentDate     string
+	currentFilePath string
+	currentWriter   *writer.ParquetWriter
+	currentFile     *os.File
+	eventCount      int64
 
 	// Configuration
 	rowGroupSize  int64
@@ -243,6 +244,7 @@ func (pw *ParquetWriter) rotateFile(date string) error {
 	pqWriter.CompressionType = pw.compression
 
 	pw.currentDate = date
+	pw.currentFilePath = filePath
 	pw.currentWriter = pqWriter
 	pw.eventCount = 0
 
@@ -297,17 +299,27 @@ func (pw *ParquetWriter) GetStats() ParquetWriterStats {
 	defer pw.mu.Unlock()
 
 	return ParquetWriterStats{
-		CurrentDate:  pw.currentDate,
-		EventCount:   pw.eventCount,
-		BasePath:     pw.basePath,
+		CurrentDate:     pw.currentDate,
+		CurrentFilePath: pw.currentFilePath,
+		EventCount:      pw.eventCount,
+		BasePath:        pw.basePath,
 	}
+}
+
+// GetCurrentFilePath returns the path of the file currently being written.
+// This is used by the reader to skip files that are still being written.
+func (pw *ParquetWriter) GetCurrentFilePath() string {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	return pw.currentFilePath
 }
 
 // ParquetWriterStats contains writer statistics.
 type ParquetWriterStats struct {
-	CurrentDate  string
-	EventCount   int64
-	BasePath     string
+	CurrentDate     string
+	CurrentFilePath string
+	EventCount      int64
+	BasePath        string
 }
 
 // convertToParquetEvent converts a TelemetryEvent to a ParquetEvent.
@@ -462,8 +474,9 @@ func jsonEncode(v interface{}) string {
 
 // ParquetReader reads telemetry events from Parquet files.
 type ParquetReader struct {
-	basePath string
-	log      logr.Logger
+	basePath       string
+	log            logr.Logger
+	skipFilesFunc  func() []string // Function to get files to skip (currently being written)
 }
 
 // NewParquetReader creates a new Parquet reader.
@@ -472,6 +485,12 @@ func NewParquetReader(basePath string, log logr.Logger) *ParquetReader {
 		basePath: basePath,
 		log:      log.WithName("parquet-reader"),
 	}
+}
+
+// SetSkipFilesFunc sets a function that returns paths of files to skip during reads.
+// This is used to skip files that are currently being written by the writer.
+func (pr *ParquetReader) SetSkipFilesFunc(fn func() []string) {
+	pr.skipFilesFunc = fn
 }
 
 // ReadEvents reads events from Parquet files within the given time range.
@@ -557,9 +576,19 @@ func (pr *ParquetReader) readDateDirectory(ctx context.Context, dateDir string, 
 
 	pr.log.Info("readDateDirectory: found entries", "count", len(entries))
 
+	// Get files to skip (currently being written)
+	var skipFiles []string
+	if pr.skipFilesFunc != nil {
+		skipFiles = pr.skipFilesFunc()
+	}
+	skipFilesMap := make(map[string]bool)
+	for _, sf := range skipFiles {
+		skipFilesMap[sf] = true
+	}
+
 	var events []*models.TelemetryEvent
 	for i, entry := range entries {
-		pr.log.Info("readDateDirectory: processing entry", "index", i, "name", entry.Name())
+		pr.log.V(1).Info("readDateDirectory: processing entry", "index", i, "name", entry.Name())
 
 		select {
 		case <-ctx.Done():
@@ -572,6 +601,13 @@ func (pr *ParquetReader) readDateDirectory(ctx context.Context, dateDir string, 
 		}
 
 		filePath := filepath.Join(dateDir, entry.Name())
+
+		// Skip files that are currently being written
+		if skipFilesMap[filePath] {
+			pr.log.Info("readDateDirectory: skipping file being written", "path", filePath)
+			continue
+		}
+
 		fileEvents, err := pr.readParquetFile(ctx, filePath, req)
 		if err != nil {
 			pr.log.Error(err, "Error reading Parquet file", "path", filePath)

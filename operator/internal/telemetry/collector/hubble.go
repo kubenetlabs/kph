@@ -360,6 +360,8 @@ func convertVerdict(v flowpb.Verdict) models.Verdict {
 }
 
 // labelsSliceToMap converts Cilium's label slice format (key=value) to a map.
+// Cilium labels have prefixes like "k8s:", "reserved:", etc. which are stripped
+// to match the label format used in policy YAML (e.g., "k8s:org=empire" -> "org": "empire").
 func labelsSliceToMap(labels []string) map[string]string {
 	if len(labels) == 0 {
 		return nil
@@ -368,13 +370,38 @@ func labelsSliceToMap(labels []string) map[string]string {
 	result := make(map[string]string, len(labels))
 	for _, label := range labels {
 		parts := strings.SplitN(label, "=", 2)
-		if len(parts) == 2 {
-			result[parts[0]] = parts[1]
-		} else {
-			result[parts[0]] = ""
+		if len(parts) >= 1 {
+			key := parts[0]
+			value := ""
+			if len(parts) == 2 {
+				value = parts[1]
+			}
+
+			// Strip Cilium label prefixes (k8s:, reserved:, etc.)
+			// These prefixes aren't used in policy YAML matchLabels
+			key = stripCiliumLabelPrefix(key)
+
+			// Skip internal Cilium labels that aren't useful for policy matching
+			if strings.HasPrefix(key, "io.cilium.") || strings.HasPrefix(key, "io.kubernetes.pod.") {
+				continue
+			}
+
+			result[key] = value
 		}
 	}
 	return result
+}
+
+// stripCiliumLabelPrefix removes Cilium-specific prefixes from label keys.
+// Common prefixes: k8s:, reserved:, container:
+func stripCiliumLabelPrefix(key string) string {
+	prefixes := []string{"k8s:", "reserved:", "container:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(key, prefix) {
+			return key[len(prefix):]
+		}
+	}
+	return key
 }
 
 // formatTCPFlags formats TCP flags as a readable string.
