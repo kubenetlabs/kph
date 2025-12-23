@@ -1120,3 +1120,415 @@ func TestServer_Stop_AfterStart(t *testing.T) {
 		t.Error("Started should be false after Stop()")
 	}
 }
+
+// mockStreamEventsServer implements TelemetryQuery_StreamEventsServer for testing
+type mockStreamEventsServer struct {
+	grpc.ServerStream
+	ctx        context.Context
+	sentEvents []*TelemetryEvent
+	sendErr    error
+}
+
+func (m *mockStreamEventsServer) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockStreamEventsServer) Send(event *TelemetryEvent) error {
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.sentEvents = append(m.sentEvents, event)
+	return nil
+}
+
+func TestServer_StreamEvents_Success(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-stream-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	now := time.Now()
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-2 * time.Hour),
+		EndTime:   now,
+		Limit:     100,
+	}
+
+	stream := &mockStreamEventsServer{
+		ctx:        context.Background(),
+		sentEvents: make([]*TelemetryEvent, 0),
+	}
+
+	err = server.StreamEvents(req, stream)
+	if err != nil {
+		t.Fatalf("StreamEvents() error = %v", err)
+	}
+
+	// Stats should be updated
+	stats := server.GetStats()
+	if stats.TotalQueries != 1 {
+		t.Errorf("TotalQueries = %d, want 1", stats.TotalQueries)
+	}
+}
+
+func TestServer_StreamEvents_WithFilters(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-stream-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	now := time.Now()
+	req := &QueryEventsRequest{
+		StartTime:  now.Add(-2 * time.Hour),
+		EndTime:    now,
+		Namespaces: []string{"default", "production"},
+		EventTypes: []string{"FLOW", "PROCESS_EXEC"},
+		Limit:      100,
+		Offset:     10,
+	}
+
+	stream := &mockStreamEventsServer{
+		ctx:        context.Background(),
+		sentEvents: make([]*TelemetryEvent, 0),
+	}
+
+	err = server.StreamEvents(req, stream)
+	if err != nil {
+		t.Fatalf("StreamEvents() with filters error = %v", err)
+	}
+
+	stats := server.GetStats()
+	if stats.TotalQueries != 1 {
+		t.Errorf("TotalQueries = %d, want 1", stats.TotalQueries)
+	}
+}
+
+func TestServer_StreamEvents_MultipleStreams(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-stream-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	now := time.Now()
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-2 * time.Hour),
+		EndTime:   now,
+		Limit:     100,
+	}
+
+	// Run multiple streams
+	for i := 0; i < 3; i++ {
+		stream := &mockStreamEventsServer{
+			ctx:        context.Background(),
+			sentEvents: make([]*TelemetryEvent, 0),
+		}
+		err = server.StreamEvents(req, stream)
+		if err != nil {
+			t.Fatalf("StreamEvents() iteration %d error = %v", i, err)
+		}
+	}
+
+	stats := server.GetStats()
+	if stats.TotalQueries != 3 {
+		t.Errorf("TotalQueries = %d, want 3", stats.TotalQueries)
+	}
+}
+
+func TestServer_GetEventCount_NoEvents(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-count-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &GetEventCountRequest{
+		StartTime: now.Add(-2 * time.Hour),
+		EndTime:   now,
+	}
+
+	resp, err := server.GetEventCount(ctx, req)
+	if err != nil {
+		t.Fatalf("GetEventCount() error = %v", err)
+	}
+
+	if resp.TotalEvents != 0 {
+		t.Errorf("TotalEvents = %d, want 0", resp.TotalEvents)
+	}
+	if resp.OldestEvent != (time.Time{}) {
+		t.Error("OldestEvent should be zero for no events")
+	}
+	if resp.NewestEvent != (time.Time{}) {
+		t.Error("NewestEvent should be zero for no events")
+	}
+}
+
+func TestServer_GetEventCount_WithNamespaces(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-count-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &GetEventCountRequest{
+		StartTime:  now.Add(-2 * time.Hour),
+		EndTime:    now,
+		Namespaces: []string{"default", "production", "staging"},
+	}
+
+	resp, err := server.GetEventCount(ctx, req)
+	if err != nil {
+		t.Fatalf("GetEventCount() error = %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("GetEventCount() returned nil response")
+	}
+}
+
+func TestServer_SimulatePolicy_WithOptions(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Test without details
+	req := &SimulatePolicyRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector: {}
+`,
+		PolicyType:     "CILIUM_NETWORK",
+		StartTime:      now.Add(-2 * time.Hour),
+		EndTime:        now,
+		IncludeDetails: false,
+		MaxDetails:     0,
+	}
+
+	resp, err := server.SimulatePolicy(ctx, req)
+	if err != nil {
+		t.Fatalf("SimulatePolicy() error = %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("SimulatePolicy() returned nil response")
+	}
+}
+
+func TestServer_SimulatePolicy_MultipleSimulations(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &SimulatePolicyRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector: {}
+`,
+		PolicyType: "CILIUM_NETWORK",
+		StartTime:  now.Add(-2 * time.Hour),
+		EndTime:    now,
+	}
+
+	// Run multiple simulations
+	for i := 0; i < 5; i++ {
+		_, err := server.SimulatePolicy(ctx, req)
+		if err != nil {
+			t.Fatalf("SimulatePolicy() iteration %d error = %v", i, err)
+		}
+	}
+
+	stats := server.GetStats()
+	if stats.TotalSimulations != 5 {
+		t.Errorf("TotalSimulations = %d, want 5", stats.TotalSimulations)
+	}
+}
+
+func TestServer_QueryEvents_StatsTracking(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-stats-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-2 * time.Hour),
+		EndTime:   now,
+		Limit:     100,
+	}
+
+	// Initial stats
+	statsBefore := server.GetStats()
+	if statsBefore.TotalQueries != 0 {
+		t.Errorf("Initial TotalQueries = %d, want 0", statsBefore.TotalQueries)
+	}
+
+	// Run query
+	_, err = server.QueryEvents(ctx, req)
+	if err != nil {
+		t.Fatalf("QueryEvents() error = %v", err)
+	}
+
+	// Check stats updated
+	statsAfter := server.GetStats()
+	if statsAfter.TotalQueries != 1 {
+		t.Errorf("TotalQueries after = %d, want 1", statsAfter.TotalQueries)
+	}
+	if !statsAfter.LastQueryTime.After(statsBefore.LastQueryTime) {
+		t.Error("LastQueryTime should be updated")
+	}
+}
