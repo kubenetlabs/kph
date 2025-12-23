@@ -55,6 +55,7 @@ export default function SimulationDetailPage() {
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- checking truthiness, not nullish
   if (error || !simulation) {
     return (
       <AppShell>
