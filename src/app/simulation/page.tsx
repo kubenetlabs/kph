@@ -31,10 +31,9 @@ export default function SimulationPage() {
   const [selectedPolicyId, setSelectedPolicyId] = useState("");
   const [selectedClusterId, setSelectedClusterId] = useState("");
   const [simulationDays, setSimulationDays] = useState(7);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Fetch simulations
-  const { data: simulations, isLoading, refetch } = trpc.simulation.list.useQuery(
+  const { data: simulations, isLoading } = trpc.simulation.list.useQuery(
     undefined,
     { refetchInterval: 5000 } // Poll every 5 seconds for running simulations
   );
@@ -45,32 +44,22 @@ export default function SimulationPage() {
   // Fetch clusters for the dropdown
   const { data: clustersData } = trpc.cluster.list.useQuery();
 
-  const handleNewSimulation = async () => {
+  // Create simulation mutation
+  const createSimulation = trpc.simulation.create.useMutation({
+    onSuccess: () => {
+      setIsNewSimModalOpen(false);
+      setSelectedPolicyId("");
+      setSelectedClusterId("");
+    },
+  });
+
+  const handleNewSimulation = () => {
     if (!selectedPolicyId || !selectedClusterId) return;
-
-    setIsSubmitting(true);
-    try {
-      const response = await fetch("/api/operator/simulation/pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          policyId: selectedPolicyId,
-          clusterId: selectedClusterId,
-          daysToAnalyze: simulationDays,
-        }),
-      });
-
-      if (response.ok) {
-        setIsNewSimModalOpen(false);
-        setSelectedPolicyId("");
-        setSelectedClusterId("");
-        void refetch();
-      }
-    } catch (error) {
-      console.error("Failed to create simulation:", error);
-    } finally {
-      setIsSubmitting(false);
-    }
+    createSimulation.mutate({
+      policyId: selectedPolicyId,
+      clusterId: selectedClusterId,
+      daysToAnalyze: simulationDays,
+    });
   };
 
   const policies = policiesData?.policies ?? [];
@@ -360,12 +349,17 @@ export default function SimulationPage() {
             </Button>
             <Button
               onClick={handleNewSimulation}
-              disabled={!selectedPolicyId || !selectedClusterId || isSubmitting}
-              isLoading={isSubmitting}
+              disabled={!selectedPolicyId || !selectedClusterId || createSimulation.isPending}
+              isLoading={createSimulation.isPending}
             >
               Start Simulation
             </Button>
           </div>
+          {createSimulation.error && (
+            <p className="mt-2 text-sm text-danger">
+              {createSimulation.error.message}
+            </p>
+          )}
         </div>
       </Modal>
     </AppShell>

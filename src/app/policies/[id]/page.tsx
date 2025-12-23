@@ -94,6 +94,14 @@ export default function PolicyDetailPage() {
     },
   });
 
+  // Simulation mutation
+  const simulationMutation = trpc.simulation.create.useMutation({
+    onSuccess: () => {
+      setIsSimulationModalOpen(false);
+      router.push("/simulation");
+    },
+  });
+
   const handleUpdate = (formData: {
     name: string;
     description?: string;
@@ -128,25 +136,13 @@ export default function PolicyDetailPage() {
     setIsSimulationModalOpen(true);
   };
 
-  const handleStartSimulation = async () => {
-    try {
-      const response = await fetch("/api/operator/simulation/pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          policyId: policy?.id,
-          clusterId: policy?.clusterId,
-          daysToAnalyze: simulationDays,
-        }),
-      });
-      if (response.ok) {
-        setIsSimulationModalOpen(false);
-        void utils.policy.getById.invalidate({ id: policyId });
-        router.push("/simulation");
-      }
-    } catch (error) {
-      console.error("Failed to start simulation:", error);
-    }
+  const handleStartSimulation = () => {
+    if (!policy) return;
+    simulationMutation.mutate({
+      policyId: policy.id,
+      clusterId: policy.clusterId,
+      daysToAnalyze: simulationDays,
+    });
   };
 
   const handleExportYAML = () => {
@@ -597,10 +593,18 @@ export default function PolicyDetailPage() {
             >
               Cancel
             </Button>
-            <Button onClick={handleStartSimulation}>
+            <Button
+              onClick={handleStartSimulation}
+              isLoading={simulationMutation.isPending}
+            >
               Start Simulation
             </Button>
           </div>
+          {simulationMutation.error && (
+            <p className="mt-2 text-sm text-danger">
+              {simulationMutation.error.message}
+            </p>
+          )}
         </div>
       </Modal>
     </AppShell>
