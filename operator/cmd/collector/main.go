@@ -18,10 +18,12 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/policy-hub/operator/internal/saas"
 	"github.com/policy-hub/operator/internal/telemetry/aggregator"
 	"github.com/policy-hub/operator/internal/telemetry/collector"
 	"github.com/policy-hub/operator/internal/telemetry/models"
 	"github.com/policy-hub/operator/internal/telemetry/query"
+	"github.com/policy-hub/operator/internal/telemetry/simulation"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
 )
 
@@ -74,6 +76,10 @@ type Config struct {
 	// Query API configuration
 	QueryEnabled bool
 	QueryAPIKey  string
+
+	// Simulation configuration
+	SimulationEnabled      bool
+	SimulationPollInterval time.Duration
 
 	// Namespace filtering
 	NamespaceFilter []string
@@ -203,6 +209,37 @@ func main() {
 		log.Info("SaaS sender disabled (no endpoint configured)")
 	}
 
+	// Initialize and start simulation worker
+	var simWorker *simulation.Worker
+	if cfg.SimulationEnabled && cfg.SaaSEnabled && cfg.SaaSEndpoint != "" {
+		// Create SaaS client for simulation
+		saasClient := saas.NewClient(cfg.SaaSEndpoint, cfg.SaaSAPIKey, cfg.ClusterID, log)
+
+		// Create simulation engine
+		simEngine := simulation.NewEngine(simulation.EngineConfig{
+			StorageManager: storageMgr,
+			Logger:         log,
+		})
+
+		// Create and start simulation worker
+		simWorker = simulation.NewWorker(simulation.WorkerConfig{
+			Engine:       simEngine,
+			SaaSClient:   saasClient,
+			PollInterval: cfg.SimulationPollInterval,
+			Logger:       log,
+		})
+
+		if err := simWorker.Start(ctx); err != nil {
+			log.Error(err, "Failed to start simulation worker")
+		} else {
+			log.Info("Simulation worker enabled",
+				"pollInterval", cfg.SimulationPollInterval,
+			)
+		}
+	} else {
+		log.Info("Simulation worker disabled")
+	}
+
 	// Initialize and start Hubble client
 	if cfg.HubbleEnabled {
 		hubbleClient := collector.NewHubbleClient(collector.HubbleClientConfig{
@@ -265,7 +302,7 @@ func main() {
 	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
 
 	// Start metrics server
-	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, queryServer, log)
+	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, queryServer, simWorker, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -330,6 +367,10 @@ func parseFlags() *Config {
 	// Query API flags
 	flag.BoolVar(&cfg.QueryEnabled, "query-enabled", getEnvBool("QUERY_ENABLED", true), "Enable query API server")
 	flag.StringVar(&cfg.QueryAPIKey, "query-api-key", getEnv("QUERY_API_KEY", ""), "API key for query authentication (empty = no auth)")
+
+	// Simulation flags
+	flag.BoolVar(&cfg.SimulationEnabled, "simulation-enabled", getEnvBool("SIMULATION_ENABLED", true), "Enable simulation worker")
+	flag.DurationVar(&cfg.SimulationPollInterval, "simulation-poll-interval", getEnvDuration("SIMULATION_POLL_INTERVAL", 30*time.Second), "Simulation poll interval")
 
 	// Logging
 	flag.StringVar(&cfg.LogLevel, "log-level", getEnv("LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
@@ -466,7 +507,7 @@ func startHealthServer(port int, buffer *collector.RingBuffer, storageMgr *stora
 	}
 }
 
-func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, queryServer *query.Server, log logr.Logger) {
+func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, queryServer *query.Server, simWorker *simulation.Worker, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -575,6 +616,26 @@ func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *stor
 				fmt.Fprintf(w, "policyhub_collector_query_server_started 1\n")
 			} else {
 				fmt.Fprintf(w, "policyhub_collector_query_server_started 0\n")
+			}
+		}
+
+		// Simulation worker metrics
+		if simWorker != nil {
+			simStats := simWorker.GetStats()
+			fmt.Fprintf(w, "# HELP policyhub_collector_simulation_processed_total Total simulations processed\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_simulation_processed_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_simulation_processed_total %d\n", simStats.TotalProcessed)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_simulation_errors_total Total simulation errors\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_simulation_errors_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_simulation_errors_total %d\n", simStats.TotalErrors)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_simulation_worker_running Simulation worker running (1=yes, 0=no)\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_simulation_worker_running gauge\n")
+			if simStats.Running {
+				fmt.Fprintf(w, "policyhub_collector_simulation_worker_running 1\n")
+			} else {
+				fmt.Fprintf(w, "policyhub_collector_simulation_worker_running 0\n")
 			}
 		}
 	})

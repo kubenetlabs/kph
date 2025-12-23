@@ -21,14 +21,16 @@ const NSImpactSchema = z.object({
 
 const SimulatedFlowSchema = z.object({
   srcNamespace: z.string(),
-  srcPodName: z.string(),
+  srcPodName: z.string().optional(),
   dstNamespace: z.string(),
-  dstPodName: z.string(),
+  dstPodName: z.string().optional(),
   dstPort: z.number().int(),
   protocol: z.string(),
   originalVerdict: z.string(),
   simulatedVerdict: z.string(),
-  wouldChange: z.boolean(),
+  verdictChanged: z.boolean(),
+  matchedRule: z.string().optional(),
+  matchReason: z.string().optional(),
 });
 
 const VerdictBreakdownSchema = z.object({
@@ -36,11 +38,13 @@ const VerdictBreakdownSchema = z.object({
   allowedToDenied: z.number().int(),
   deniedToAllowed: z.number().int(),
   deniedToDenied: z.number().int(),
+  droppedToAllowed: z.number().int().optional(),
+  droppedToDenied: z.number().int().optional(),
 });
 
 const SimulationResultSchema = z.object({
   simulationId: z.string(),
-  clusterId: z.string(),
+  clusterId: z.string().optional(),
   policyContent: z.string(),
   policyType: z.string(),
   startTime: z.string().datetime(),
@@ -84,27 +88,20 @@ export async function POST(request: NextRequest) {
     const parseResult = SimulationResultSchema.safeParse(body);
 
     if (!parseResult.success) {
+      console.error("Validation errors:", parseResult.error.issues);
       return NextResponse.json(
         { success: false, error: "Invalid request body", details: parseResult.error.issues },
         { status: 400 }
       );
     }
 
-    const data: z.infer<typeof SimulationResultSchema> = parseResult.data;
+    const data = parseResult.data;
 
-    // Verify cluster ID matches authenticated cluster
-    if (data.clusterId !== auth.clusterId) {
-      return NextResponse.json(
-        { success: false, error: "Cluster ID mismatch" },
-        { status: 403 }
-      );
-    }
-
-    // Check if simulation exists and belongs to this cluster
-    const existingSimulation = await db.policySimulation.findFirst({
+    // Check if simulation exists in Simulation table (created by UI)
+    const existingSimulation = await db.simulation.findFirst({
       where: {
         id: data.simulationId,
-        clusterId: data.clusterId,
+        clusterId: auth.clusterId,
       },
     });
 
@@ -117,44 +114,35 @@ export async function POST(request: NextRequest) {
 
     // Determine final status
     const hasErrors = data.errors && data.errors.length > 0;
-    const status = hasErrors ? "COMPLETED_WITH_ERRORS" : "COMPLETED";
+    const status = hasErrors ? "FAILED" : "COMPLETED";
 
     // Update simulation with results
-    await db.policySimulation.update({
+    await db.simulation.update({
       where: { id: data.simulationId },
       data: {
         status,
         completedAt: new Date(),
-        totalFlowsAnalyzed: BigInt(data.totalFlowsAnalyzed),
-        allowedCount: BigInt(data.allowedCount),
-        deniedCount: BigInt(data.deniedCount),
-        noChangeCount: BigInt(data.noChangeCount),
-        wouldChangeCount: BigInt(data.wouldChangeCount),
-        breakdownByNamespace: data.breakdownByNamespace as object,
-        breakdownByVerdict: data.breakdownByVerdict as object,
-        sampleFlows: data.sampleFlows as object[],
-        errors: data.errors ?? [],
-        durationNs: BigInt(data.duration),
+        flowsAnalyzed: data.totalFlowsAnalyzed,
+        flowsAllowed: data.allowedCount,
+        flowsDenied: data.deniedCount,
+        flowsChanged: data.wouldChangeCount,
+        results: {
+          noChangeCount: data.noChangeCount,
+          breakdownByNamespace: data.breakdownByNamespace,
+          breakdownByVerdict: data.breakdownByVerdict,
+          sampleFlows: data.sampleFlows,
+          errors: data.errors,
+          durationNs: data.duration,
+        },
       },
     });
 
-    // Create notification for significant changes
-    if (data.wouldChangeCount > 0) {
-      await db.notification.create({
-        data: {
-          clusterId: data.clusterId,
-          type: "SIMULATION_COMPLETE",
-          title: "Policy Simulation Complete",
-          message: `Simulation found ${data.wouldChangeCount} flows that would change behavior`,
-          metadata: {
-            simulationId: data.simulationId,
-            wouldChangeCount: data.wouldChangeCount,
-            totalFlowsAnalyzed: data.totalFlowsAnalyzed,
-          },
-          read: false,
-        },
-      });
-    }
+    // Log the update
+    console.log(`Simulation ${data.simulationId} completed:`, {
+      status,
+      totalFlows: data.totalFlowsAnalyzed,
+      wouldChange: data.wouldChangeCount,
+    });
 
     return NextResponse.json({
       success: true,
@@ -180,7 +168,6 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const simulationId = searchParams.get("id");
-    const clusterId = searchParams.get("clusterId");
 
     if (!simulationId) {
       return NextResponse.json(
@@ -189,10 +176,25 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const simulation = await db.policySimulation.findFirst({
+    const simulation = await db.simulation.findFirst({
       where: {
         id: simulationId,
-        ...(clusterId ? { clusterId } : {}),
+      },
+      include: {
+        policy: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            content: true,
+          },
+        },
+        cluster: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -207,27 +209,20 @@ export async function GET(request: NextRequest) {
       success: true,
       simulation: {
         id: simulation.id,
-        clusterId: simulation.clusterId,
-        policyContent: simulation.policyContent,
-        policyType: simulation.policyType,
+        name: simulation.name,
+        description: simulation.description,
         status: simulation.status,
+        policy: simulation.policy,
+        cluster: simulation.cluster,
         startTime: simulation.startTime.toISOString(),
         endTime: simulation.endTime.toISOString(),
-        namespaces: simulation.namespaces,
-        totalFlowsAnalyzed: simulation.totalFlowsAnalyzed?.toString(),
-        allowedCount: simulation.allowedCount?.toString(),
-        deniedCount: simulation.deniedCount?.toString(),
-        noChangeCount: simulation.noChangeCount?.toString(),
-        wouldChangeCount: simulation.wouldChangeCount?.toString(),
-        breakdownByNamespace: simulation.breakdownByNamespace,
-        breakdownByVerdict: simulation.breakdownByVerdict,
-        sampleFlows: simulation.sampleFlows,
-        errors: simulation.errors,
-        requestedAt: simulation.requestedAt.toISOString(),
+        flowsAnalyzed: simulation.flowsAnalyzed,
+        flowsAllowed: simulation.flowsAllowed,
+        flowsDenied: simulation.flowsDenied,
+        flowsChanged: simulation.flowsChanged,
+        results: simulation.results,
+        createdAt: simulation.createdAt.toISOString(),
         completedAt: simulation.completedAt?.toISOString(),
-        durationMs: simulation.durationNs
-          ? Number(simulation.durationNs) / 1_000_000
-          : null,
       },
     });
   } catch (error) {
