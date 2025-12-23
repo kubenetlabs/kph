@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -1530,5 +1531,513 @@ func TestServer_QueryEvents_StatsTracking(t *testing.T) {
 	}
 	if !statsAfter.LastQueryTime.After(statsBefore.LastQueryTime) {
 		t.Error("LastQueryTime should be updated")
+	}
+}
+
+func TestServer_QueryEvents_WithData(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "query-data-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Write test events
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "event-1",
+			Timestamp:    now.Add(-30 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			SrcPodName:   "frontend-abc",
+			DstNamespace: "production",
+			DstPodName:   "backend-xyz",
+			DstPort:      8080,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictAllowed,
+		},
+		{
+			ID:           "event-2",
+			Timestamp:    now.Add(-20 * time.Minute),
+			EventType:    models.EventTypeProcessExec,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			SrcPodName:   "app-pod",
+			SrcBinary:    "/bin/bash",
+			SrcProcess:   "bash",
+		},
+		{
+			ID:           "event-3",
+			Timestamp:    now.Add(-10 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "production",
+			DstNamespace: "default",
+			DstPort:      443,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictDenied,
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Close and reopen to flush data
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	mgr, err = storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+		Limit:     100,
+	}
+
+	resp, err := server.QueryEvents(ctx, req)
+	if err != nil {
+		t.Fatalf("QueryEvents() error = %v", err)
+	}
+
+	if len(resp.Events) != 3 {
+		t.Errorf("Expected 3 events, got %d", len(resp.Events))
+	}
+
+	// Check stats show returned events
+	stats := server.GetStats()
+	if stats.TotalEvents != 3 {
+		t.Errorf("TotalEvents = %d, want 3", stats.TotalEvents)
+	}
+}
+
+func TestServer_StreamEvents_WithData(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "stream-data-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Write test events
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "stream-1",
+			Timestamp:    now.Add(-30 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			DstNamespace: "production",
+			DstPort:      8080,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictAllowed,
+		},
+		{
+			ID:           "stream-2",
+			Timestamp:    now.Add(-20 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "production",
+			DstNamespace: "default",
+			DstPort:      443,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictAllowed,
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	mgr, err = storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+		Limit:     100,
+	}
+
+	stream := &mockStreamEventsServer{
+		ctx:        context.Background(),
+		sentEvents: make([]*TelemetryEvent, 0),
+	}
+
+	err = server.StreamEvents(req, stream)
+	if err != nil {
+		t.Fatalf("StreamEvents() error = %v", err)
+	}
+
+	if len(stream.sentEvents) != 2 {
+		t.Errorf("Expected 2 streamed events, got %d", len(stream.sentEvents))
+	}
+
+	// Verify events were sent correctly
+	for _, e := range stream.sentEvents {
+		if e.NodeName != "test-node" {
+			t.Errorf("NodeName = %s, want test-node", e.NodeName)
+		}
+	}
+
+	stats := server.GetStats()
+	if stats.TotalEvents != 2 {
+		t.Errorf("TotalEvents = %d, want 2", stats.TotalEvents)
+	}
+}
+
+func TestServer_StreamEvents_SendError(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "stream-error-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Write a test event
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "error-event",
+			Timestamp:    now.Add(-10 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			Verdict:      models.VerdictAllowed,
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	mgr, err = storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	req := &QueryEventsRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+		Limit:     100,
+	}
+
+	// Create a stream that returns an error on Send
+	sendErr := fmt.Errorf("stream send error")
+	stream := &mockStreamEventsServer{
+		ctx:        context.Background(),
+		sentEvents: make([]*TelemetryEvent, 0),
+		sendErr:    sendErr,
+	}
+
+	err = server.StreamEvents(req, stream)
+	if err == nil {
+		t.Error("StreamEvents() should return error when Send fails")
+	}
+}
+
+func TestServer_GetEventCount_WithData(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "count-data-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Write test events with different types and nodes
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "count-1",
+			Timestamp:    now.Add(-30 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "node-1",
+			SrcNamespace: "default",
+			Verdict:      models.VerdictAllowed,
+		},
+		{
+			ID:           "count-2",
+			Timestamp:    now.Add(-20 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "node-1",
+			SrcNamespace: "default",
+			Verdict:      models.VerdictDenied,
+		},
+		{
+			ID:           "count-3",
+			Timestamp:    now.Add(-10 * time.Minute),
+			EventType:    models.EventTypeProcessExec,
+			NodeName:     "node-2",
+			SrcNamespace: "production",
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	mgr, err = storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	req := &GetEventCountRequest{
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   now.Add(1 * time.Hour),
+	}
+
+	resp, err := server.GetEventCount(ctx, req)
+	if err != nil {
+		t.Fatalf("GetEventCount() error = %v", err)
+	}
+
+	// Check event counts by type
+	if resp.EventsByType["FLOW"] != 2 {
+		t.Errorf("EventsByType[FLOW] = %d, want 2", resp.EventsByType["FLOW"])
+	}
+	if resp.EventsByType["PROCESS_EXEC"] != 1 {
+		t.Errorf("EventsByType[PROCESS_EXEC] = %d, want 1", resp.EventsByType["PROCESS_EXEC"])
+	}
+
+	// Check event counts by node
+	if resp.EventsByNode["node-1"] != 2 {
+		t.Errorf("EventsByNode[node-1] = %d, want 2", resp.EventsByNode["node-1"])
+	}
+	if resp.EventsByNode["node-2"] != 1 {
+		t.Errorf("EventsByNode[node-2] = %d, want 1", resp.EventsByNode["node-2"])
+	}
+
+	// Check oldest and newest events
+	if resp.OldestEvent.IsZero() {
+		t.Error("OldestEvent should not be zero")
+	}
+	if resp.NewestEvent.IsZero() {
+		t.Error("NewestEvent should not be zero")
+	}
+	if !resp.OldestEvent.Before(resp.NewestEvent) {
+		t.Error("OldestEvent should be before NewestEvent")
+	}
+}
+
+func TestServer_SimulatePolicy_WithData(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sim-data-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Write test flow events
+	events := []*models.TelemetryEvent{
+		{
+			ID:           "sim-flow-1",
+			Timestamp:    now.Add(-30 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			SrcPodName:   "frontend",
+			SrcPodLabels: map[string]string{"app": "frontend"},
+			DstNamespace: "default",
+			DstPodName:   "backend",
+			DstPodLabels: map[string]string{"app": "backend"},
+			DstPort:      8080,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictAllowed,
+		},
+		{
+			ID:           "sim-flow-2",
+			Timestamp:    now.Add(-20 * time.Minute),
+			EventType:    models.EventTypeFlow,
+			NodeName:     "test-node",
+			SrcNamespace: "default",
+			SrcPodName:   "unknown",
+			DstNamespace: "default",
+			DstPodName:   "backend",
+			DstPodLabels: map[string]string{"app": "backend"},
+			DstPort:      8080,
+			Protocol:     "TCP",
+			Verdict:      models.VerdictAllowed,
+		},
+	}
+
+	if err := mgr.Write(events); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	mgr, err = storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	server := NewServer(ServerConfig{
+		StorageManager: mgr,
+		APIKey:         "",
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	req := &SimulatePolicyRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: frontend
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+`,
+		PolicyType:     "CILIUM_NETWORK",
+		StartTime:      now.Add(-1 * time.Hour),
+		EndTime:        now.Add(1 * time.Hour),
+		Namespaces:     []string{"default"},
+		IncludeDetails: true,
+		MaxDetails:     100,
+	}
+
+	resp, err := server.SimulatePolicy(ctx, req)
+	if err != nil {
+		t.Fatalf("SimulatePolicy() error = %v", err)
+	}
+
+	if resp.TotalFlowsAnalyzed != 2 {
+		t.Errorf("TotalFlowsAnalyzed = %d, want 2", resp.TotalFlowsAnalyzed)
+	}
+
+	// With the policy, frontend->backend should be allowed, unknown->backend should be denied
+	// So we expect at least one "would change" flow
+	stats := server.GetStats()
+	if stats.TotalSimulations != 1 {
+		t.Errorf("TotalSimulations = %d, want 1", stats.TotalSimulations)
 	}
 }
