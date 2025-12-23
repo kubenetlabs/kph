@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/policy-hub/operator/internal/telemetry/models"
+	"github.com/policy-hub/operator/internal/telemetry/simulation"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 	UnimplementedTelemetryQueryServer
 
 	storageMgr *storage.Manager
+	simEngine  *simulation.Engine
 	log        logr.Logger
 	apiKey     string
 
@@ -35,10 +37,11 @@ type Server struct {
 	started    bool
 
 	// Metrics
-	totalQueries    int64
-	totalEvents     int64
-	queryErrors     int64
-	lastQueryTime   time.Time
+	totalQueries      int64
+	totalEvents       int64
+	queryErrors       int64
+	totalSimulations  int64
+	lastQueryTime     time.Time
 }
 
 // ServerConfig contains configuration for the query server.
@@ -53,10 +56,15 @@ type ServerConfig struct {
 
 // NewServer creates a new query server.
 func NewServer(cfg ServerConfig) *Server {
+	log := cfg.Logger.WithName("query-server")
 	return &Server{
 		storageMgr: cfg.StorageManager,
-		apiKey:     cfg.APIKey,
-		log:        cfg.Logger.WithName("query-server"),
+		simEngine: simulation.NewEngine(simulation.EngineConfig{
+			StorageManager: cfg.StorageManager,
+			Logger:         cfg.Logger,
+		}),
+		apiKey: cfg.APIKey,
+		log:    log,
 	}
 }
 
@@ -334,23 +342,143 @@ func (s *Server) GetEventCount(ctx context.Context, req *GetEventCountRequest) (
 	}, nil
 }
 
+// SimulatePolicy evaluates a policy against historical data.
+func (s *Server) SimulatePolicy(ctx context.Context, req *SimulatePolicyRequest) (*SimulatePolicyResponse, error) {
+	s.mu.Lock()
+	s.totalSimulations++
+	s.lastQueryTime = time.Now()
+	s.mu.Unlock()
+
+	s.log.Info("SimulatePolicy called",
+		"policyType", req.PolicyType,
+		"startTime", req.StartTime,
+		"endTime", req.EndTime,
+		"namespaces", req.Namespaces,
+	)
+
+	// Convert request to simulation request
+	simReq := &simulation.SimulationRequest{
+		PolicyContent:  req.PolicyContent,
+		PolicyType:     req.PolicyType,
+		StartTime:      req.StartTime,
+		EndTime:        req.EndTime,
+		Namespaces:     req.Namespaces,
+		IncludeDetails: req.IncludeDetails,
+		MaxDetails:     req.MaxDetails,
+	}
+
+	// Run simulation
+	result, err := s.simEngine.Simulate(ctx, simReq)
+	if err != nil {
+		s.log.Error(err, "Simulation failed")
+		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
+	}
+
+	// Convert to response
+	response := &SimulatePolicyResponse{
+		TotalFlowsAnalyzed:   result.TotalFlowsAnalyzed,
+		AllowedCount:         result.AllowedCount,
+		DeniedCount:          result.DeniedCount,
+		NoChangeCount:        result.NoChangeCount,
+		WouldChangeCount:     result.WouldChangeCount,
+		BreakdownByNamespace: convertNamespaceBreakdown(result.BreakdownByNamespace),
+		BreakdownByVerdict:   convertVerdictBreakdown(result.BreakdownByVerdict),
+		Details:              convertFlowDetails(result.Details),
+		Errors:               result.Errors,
+		SimulationTime:       result.SimulationTime,
+		Duration:             result.Duration,
+	}
+
+	s.log.Info("SimulatePolicy completed",
+		"totalFlows", response.TotalFlowsAnalyzed,
+		"wouldChange", response.WouldChangeCount,
+		"duration", response.Duration,
+	)
+
+	return response, nil
+}
+
+// Helper functions for converting simulation types to query types
+
+func convertNamespaceBreakdown(input map[string]*simulation.NamespaceImpact) map[string]*NamespaceImpact {
+	if input == nil {
+		return nil
+	}
+	output := make(map[string]*NamespaceImpact)
+	for k, v := range input {
+		output[k] = &NamespaceImpact{
+			Namespace:    v.Namespace,
+			TotalFlows:   v.TotalFlows,
+			AllowedCount: v.AllowedCount,
+			DeniedCount:  v.DeniedCount,
+			WouldDeny:    v.WouldDeny,
+			WouldAllow:   v.WouldAllow,
+			NoChange:     v.NoChange,
+		}
+	}
+	return output
+}
+
+func convertVerdictBreakdown(input *simulation.VerdictBreakdown) *VerdictBreakdown {
+	if input == nil {
+		return nil
+	}
+	return &VerdictBreakdown{
+		AllowedToAllowed: input.AllowedToAllowed,
+		AllowedToDenied:  input.AllowedToDenied,
+		DeniedToAllowed:  input.DeniedToAllowed,
+		DeniedToDenied:   input.DeniedToDenied,
+		DroppedToAllowed: input.DroppedToAllowed,
+		DroppedToDenied:  input.DroppedToDenied,
+	}
+}
+
+func convertFlowDetails(input []*simulation.FlowSimulationResult) []*FlowSimulationResult {
+	if input == nil {
+		return nil
+	}
+	output := make([]*FlowSimulationResult, len(input))
+	for i, v := range input {
+		output[i] = &FlowSimulationResult{
+			Timestamp:        v.Timestamp,
+			SrcNamespace:     v.SrcNamespace,
+			SrcPodName:       v.SrcPodName,
+			DstNamespace:     v.DstNamespace,
+			DstPodName:       v.DstPodName,
+			DstPort:          v.DstPort,
+			Protocol:         v.Protocol,
+			L7Type:           v.L7Type,
+			HTTPMethod:       v.HTTPMethod,
+			HTTPPath:         v.HTTPPath,
+			OriginalVerdict:  v.OriginalVerdict,
+			SimulatedVerdict: v.SimulatedVerdict,
+			VerdictChanged:   v.VerdictChanged,
+			MatchedRule:      v.MatchedRule,
+			MatchReason:      v.MatchReason,
+		}
+	}
+	return output
+}
+
 // GetStats returns server statistics.
 func (s *Server) GetStats() ServerStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	return ServerStats{
-		TotalQueries:  s.totalQueries,
-		TotalEvents:   s.totalEvents,
-		QueryErrors:   s.queryErrors,
-		LastQueryTime: s.lastQueryTime,
-		Started:       s.started,
+		TotalQueries:     s.totalQueries,
+		TotalEvents:      s.totalEvents,
+		QueryErrors:      s.queryErrors,
+		TotalSimulations: s.totalSimulations,
+		LastQueryTime:    s.lastQueryTime,
+		Started:          s.started,
 	}
 }
 
 // ServerStats contains server statistics.
 type ServerStats struct {
-	TotalQueries  int64
+	TotalQueries     int64
+	TotalSimulations int64
 	TotalEvents   int64
 	QueryErrors   int64
 	LastQueryTime time.Time

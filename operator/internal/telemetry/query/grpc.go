@@ -27,6 +27,10 @@ var TelemetryQuery_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetEventCount",
 			Handler:    _TelemetryQuery_GetEventCount_Handler,
 		},
+		{
+			MethodName: "SimulatePolicy",
+			Handler:    _TelemetryQuery_SimulatePolicy_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -70,6 +74,24 @@ func _TelemetryQuery_GetEventCount_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TelemetryQueryServer).GetEventCount(ctx, req.(*GetEventCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TelemetryQuery_SimulatePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SimulatePolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TelemetryQueryServer).SimulatePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/" + TelemetryQueryServiceName + "/SimulatePolicy",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TelemetryQueryServer).SimulatePolicy(ctx, req.(*SimulatePolicyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -140,6 +162,15 @@ func (x *telemetryQueryStreamEventsClient) Recv() (*TelemetryEvent, error) {
 func (c *telemetryQueryClient) GetEventCount(ctx context.Context, in *GetEventCountRequest, opts ...grpc.CallOption) (*EventCountResponse, error) {
 	out := new(EventCountResponse)
 	err := c.cc.Invoke(ctx, "/"+TelemetryQueryServiceName+"/GetEventCount", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *telemetryQueryClient) SimulatePolicy(ctx context.Context, in *SimulatePolicyRequest, opts ...grpc.CallOption) (*SimulatePolicyResponse, error) {
+	out := new(SimulatePolicyResponse)
+	err := c.cc.Invoke(ctx, "/"+TelemetryQueryServiceName+"/SimulatePolicy", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}

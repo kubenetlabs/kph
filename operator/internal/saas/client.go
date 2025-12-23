@@ -515,6 +515,153 @@ type SubmitAggregatesResponse struct {
 	Error            string `json:"error,omitempty"`
 }
 
+// SimulationResult represents the result of a policy simulation
+type SimulationResult struct {
+	SimulationID       string                       `json:"simulationId"`
+	ClusterID          string                       `json:"clusterId"`
+	PolicyContent      string                       `json:"policyContent"`
+	PolicyType         string                       `json:"policyType"`
+	StartTime          time.Time                    `json:"startTime"`
+	EndTime            time.Time                    `json:"endTime"`
+	Namespaces         []string                     `json:"namespaces,omitempty"`
+	TotalFlowsAnalyzed int64                        `json:"totalFlowsAnalyzed"`
+	AllowedCount       int64                        `json:"allowedCount"`
+	DeniedCount        int64                        `json:"deniedCount"`
+	NoChangeCount      int64                        `json:"noChangeCount"`
+	WouldChangeCount   int64                        `json:"wouldChangeCount"`
+	BreakdownByNS      map[string]*NSImpact         `json:"breakdownByNamespace,omitempty"`
+	BreakdownByVerdict *SimVerdictBreakdown         `json:"breakdownByVerdict,omitempty"`
+	SampleFlows        []SimulatedFlow              `json:"sampleFlows,omitempty"`
+	Errors             []string                     `json:"errors,omitempty"`
+	SimulationTime     time.Time                    `json:"simulationTime"`
+	Duration           time.Duration                `json:"duration"`
+}
+
+// NSImpact shows simulation impact per namespace
+type NSImpact struct {
+	Namespace    string `json:"namespace"`
+	TotalFlows   int64  `json:"totalFlows"`
+	AllowedCount int64  `json:"allowedCount"`
+	DeniedCount  int64  `json:"deniedCount"`
+	WouldDeny    int64  `json:"wouldDeny"`
+	WouldAllow   int64  `json:"wouldAllow"`
+	NoChange     int64  `json:"noChange"`
+}
+
+// SimVerdictBreakdown shows verdict transition counts
+type SimVerdictBreakdown struct {
+	AllowedToAllowed int64 `json:"allowedToAllowed"`
+	AllowedToDenied  int64 `json:"allowedToDenied"`
+	DeniedToAllowed  int64 `json:"deniedToAllowed"`
+	DeniedToDenied   int64 `json:"deniedToDenied"`
+	DroppedToAllowed int64 `json:"droppedToAllowed"`
+	DroppedToDenied  int64 `json:"droppedToDenied"`
+}
+
+// SimulatedFlow represents a single flow's simulation result
+type SimulatedFlow struct {
+	Timestamp        time.Time `json:"timestamp"`
+	SrcNamespace     string    `json:"srcNamespace"`
+	SrcPodName       string    `json:"srcPodName,omitempty"`
+	DstNamespace     string    `json:"dstNamespace"`
+	DstPodName       string    `json:"dstPodName,omitempty"`
+	DstPort          uint32    `json:"dstPort"`
+	Protocol         string    `json:"protocol"`
+	OriginalVerdict  string    `json:"originalVerdict"`
+	SimulatedVerdict string    `json:"simulatedVerdict"`
+	VerdictChanged   bool      `json:"verdictChanged"`
+	MatchedRule      string    `json:"matchedRule,omitempty"`
+	MatchReason      string    `json:"matchReason,omitempty"`
+}
+
+// SubmitSimulationResultResponse is the response from submitting simulation results
+type SubmitSimulationResultResponse struct {
+	Success      bool   `json:"success"`
+	SimulationID string `json:"simulationId"`
+	Error        string `json:"error,omitempty"`
+}
+
+// SubmitSimulationResult sends simulation results to the SaaS platform for tracking
+func (c *Client) SubmitSimulationResult(ctx context.Context, result *SimulationResult) (*SubmitSimulationResultResponse, error) {
+	if result == nil {
+		return &SubmitSimulationResultResponse{Success: true}, nil
+	}
+
+	// Set cluster ID if not already set
+	if result.ClusterID == "" {
+		result.ClusterID = c.clusterID
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal simulation result: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, "POST", "/api/operator/simulation/results", body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to submit simulation result: %w", err)
+	}
+
+	var response SubmitSimulationResultResponse
+	if err := json.Unmarshal(resp, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal simulation result response: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("submit simulation result failed: %s", response.Error)
+	}
+
+	c.log.Info("Submitted simulation result to SaaS platform",
+		"simulationId", response.SimulationID,
+		"totalFlows", result.TotalFlowsAnalyzed,
+		"wouldChange", result.WouldChangeCount)
+
+	return &response, nil
+}
+
+// FetchPendingSimulationsResponse is the response from fetching pending simulations
+type FetchPendingSimulationsResponse struct {
+	Success     bool                 `json:"success"`
+	Simulations []PendingSimulation  `json:"simulations"`
+	Error       string               `json:"error,omitempty"`
+}
+
+// PendingSimulation represents a simulation request from the SaaS
+type PendingSimulation struct {
+	SimulationID   string    `json:"simulationId"`
+	PolicyContent  string    `json:"policyContent"`
+	PolicyType     string    `json:"policyType"`
+	StartTime      time.Time `json:"startTime"`
+	EndTime        time.Time `json:"endTime"`
+	Namespaces     []string  `json:"namespaces,omitempty"`
+	IncludeDetails bool      `json:"includeDetails,omitempty"`
+	MaxDetails     int32     `json:"maxDetails,omitempty"`
+	RequestedAt    time.Time `json:"requestedAt"`
+}
+
+// FetchPendingSimulations retrieves pending simulation requests from SaaS
+func (c *Client) FetchPendingSimulations(ctx context.Context) (*FetchPendingSimulationsResponse, error) {
+	resp, err := c.doRequest(ctx, "GET", "/api/operator/simulation/pending", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch pending simulations: %w", err)
+	}
+
+	var result FetchPendingSimulationsResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pending simulations response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("fetch pending simulations failed: %s", result.Error)
+	}
+
+	if len(result.Simulations) > 0 {
+		c.log.Info("Fetched pending simulations from SaaS", "count", len(result.Simulations))
+	}
+
+	return &result, nil
+}
+
 // SubmitAggregates sends aggregated telemetry to the SaaS platform
 func (c *Client) SubmitAggregates(ctx context.Context, aggregates *AggregatedTelemetry) (*SubmitAggregatesResponse, error) {
 	if aggregates == nil {
