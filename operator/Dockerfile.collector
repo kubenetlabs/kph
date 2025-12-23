@@ -1,0 +1,39 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /workspace
+
+# Install build dependencies (need CGO for SQLite)
+RUN apk add --no-cache git ca-certificates gcc musl-dev
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY cmd/ cmd/
+COPY api/ api/
+COPY internal/ internal/
+
+# Build collector (CGO enabled for SQLite)
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -o collector cmd/collector/main.go
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /
+
+COPY --from=builder /workspace/collector .
+
+# Run as non-root user
+USER 65534:65534
+
+# Health check endpoint
+EXPOSE 8080
+# Metrics endpoint
+EXPOSE 9090
+
+ENTRYPOINT ["/collector"]
