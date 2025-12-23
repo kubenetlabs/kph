@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/policy-hub/operator/internal/telemetry/aggregator"
 	"github.com/policy-hub/operator/internal/telemetry/collector"
 	"github.com/policy-hub/operator/internal/telemetry/models"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
@@ -145,6 +146,32 @@ func main() {
 	// Start buffer flush worker
 	go buffer.StartFlushWorker(ctx)
 
+	// Initialize SaaS sender for aggregated telemetry
+	var saasSender *aggregator.SaaSSender
+	if cfg.SaaSEnabled && cfg.SaaSEndpoint != "" {
+		saasSender = aggregator.NewSaaSSender(aggregator.SaaSSenderConfig{
+			Endpoint:      cfg.SaaSEndpoint + "/api/operator/telemetry/aggregates",
+			APIKey:        cfg.SaaSAPIKey,
+			ClusterID:     cfg.ClusterID,
+			SendInterval:  cfg.AggregationWindow,
+			MaxRetries:    3,
+			RetryInterval: 5 * time.Second,
+			Timeout:       30 * time.Second,
+			NodeName:      cfg.NodeName,
+			Logger:        log,
+		})
+
+		// Start the SaaS sender
+		go saasSender.Start(ctx)
+
+		log.Info("SaaS sender enabled",
+			"endpoint", cfg.SaaSEndpoint,
+			"aggregationWindow", cfg.AggregationWindow,
+		)
+	} else {
+		log.Info("SaaS sender disabled (no endpoint configured)")
+	}
+
 	// Initialize and start Hubble client
 	if cfg.HubbleEnabled {
 		hubbleClient := collector.NewHubbleClient(collector.HubbleClientConfig{
@@ -157,6 +184,10 @@ func main() {
 
 		hubbleClient.SetEventHandler(func(event *models.TelemetryEvent) {
 			buffer.Push(event)
+			// Also send to SaaS aggregator
+			if saasSender != nil {
+				saasSender.AddEvent(event)
+			}
 		})
 
 		go func() {
@@ -186,6 +217,10 @@ func main() {
 			normalizer.NormalizeEvent(event)
 			normalizer.EnrichProcessEvent(event)
 			buffer.Push(event)
+			// Also send to SaaS aggregator
+			if saasSender != nil {
+				saasSender.AddEvent(event)
+			}
 		})
 
 		go func() {
@@ -199,7 +234,7 @@ func main() {
 	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
 
 	// Start metrics server
-	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, log)
+	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -214,6 +249,13 @@ func main() {
 	// Final flush of storage
 	if err := storageMgr.Flush(); err != nil {
 		log.Error(err, "Final storage flush failed")
+	}
+
+	// Final flush of SaaS sender
+	if saasSender != nil {
+		if err := saasSender.ForceFlush(context.Background()); err != nil {
+			log.Error(err, "Final SaaS sender flush failed")
+		}
 	}
 
 	log.Info("Collector stopped")
@@ -388,7 +430,7 @@ func startHealthServer(port int, buffer *collector.RingBuffer, storageMgr *stora
 	}
 }
 
-func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, log logr.Logger) {
+func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -445,6 +487,34 @@ func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *stor
 				fmt.Fprintf(w, "# HELP policyhub_collector_storage_days_stored Days of data stored\n")
 				fmt.Fprintf(w, "# TYPE policyhub_collector_storage_days_stored gauge\n")
 				fmt.Fprintf(w, "policyhub_collector_storage_days_stored %d\n", storageStats.RetentionStats.DaysStored)
+			}
+		}
+
+		// SaaS sender metrics
+		if saasSender != nil && saasSender.IsEnabled() {
+			saasStats := saasSender.GetStats()
+			fmt.Fprintf(w, "# HELP policyhub_collector_saas_sent_total Total aggregates sent to SaaS\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_saas_sent_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_saas_sent_total %d\n", saasStats.TotalSent)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_saas_failed_total Total aggregates failed to send\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_saas_failed_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_saas_failed_total %d\n", saasStats.TotalFailed)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_saas_pending_flows Pending flow aggregations\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_saas_pending_flows gauge\n")
+			fmt.Fprintf(w, "policyhub_collector_saas_pending_flows %d\n", saasStats.PendingFlows)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_saas_pending_process Pending process aggregations\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_saas_pending_process gauge\n")
+			fmt.Fprintf(w, "policyhub_collector_saas_pending_process %d\n", saasStats.PendingProcessEvents)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_saas_last_send_success Last send success (1=success, 0=failure)\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_saas_last_send_success gauge\n")
+			if saasStats.LastSendSuccess {
+				fmt.Fprintf(w, "policyhub_collector_saas_last_send_success 1\n")
+			} else {
+				fmt.Fprintf(w, "policyhub_collector_saas_last_send_success 0\n")
 			}
 		}
 	})

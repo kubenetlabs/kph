@@ -438,3 +438,116 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 func (c *Client) SetHTTPClient(client *http.Client) {
 	c.httpClient = client
 }
+
+// AggregatedTelemetry represents aggregated telemetry data
+type AggregatedTelemetry struct {
+	ClusterID        string              `json:"clusterId"`
+	Timestamp        time.Time           `json:"timestamp"`
+	FlowSummaries    []FlowSummary       `json:"flowSummaries,omitempty"`
+	ProcessSummaries []ProcessSummary    `json:"processSummaries,omitempty"`
+}
+
+// FlowSummary represents aggregated flow data
+type FlowSummary struct {
+	WindowStart      time.Time          `json:"windowStart"`
+	WindowEnd        time.Time          `json:"windowEnd"`
+	NodeName         string             `json:"nodeName"`
+	SrcNamespace     string             `json:"srcNamespace"`
+	DstNamespace     string             `json:"dstNamespace"`
+	SrcPodName       string             `json:"srcPodName,omitempty"`
+	DstPodName       string             `json:"dstPodName,omitempty"`
+	DstPort          uint32             `json:"dstPort"`
+	Protocol         string             `json:"protocol"`
+	L7Type           string             `json:"l7Type,omitempty"`
+	TotalFlows       int64              `json:"totalFlows"`
+	AllowedFlows     int64              `json:"allowedFlows"`
+	DeniedFlows      int64              `json:"deniedFlows"`
+	DroppedFlows     int64              `json:"droppedFlows"`
+	TotalBytes       int64              `json:"totalBytes"`
+	TotalPackets     int64              `json:"totalPackets"`
+	HTTPMethodCounts map[string]int64   `json:"httpMethodCounts,omitempty"`
+	HTTPStatusCounts map[int32]int64    `json:"httpStatusCounts,omitempty"`
+	TopHTTPPaths     []PathCount        `json:"topHttpPaths,omitempty"`
+	TopDNSQueries    []DNSQueryCount    `json:"topDnsQueries,omitempty"`
+}
+
+// PathCount tracks HTTP path frequency
+type PathCount struct {
+	Path  string `json:"path"`
+	Count int64  `json:"count"`
+}
+
+// DNSQueryCount tracks DNS query frequency
+type DNSQueryCount struct {
+	Query string `json:"query"`
+	Type  string `json:"type,omitempty"`
+	Count int64  `json:"count"`
+}
+
+// ProcessSummary represents aggregated process event data
+type ProcessSummary struct {
+	WindowStart     time.Time        `json:"windowStart"`
+	WindowEnd       time.Time        `json:"windowEnd"`
+	NodeName        string           `json:"nodeName"`
+	Namespace       string           `json:"namespace"`
+	PodName         string           `json:"podName,omitempty"`
+	TotalExecs      int64            `json:"totalExecs"`
+	UniqueBinaries  int64            `json:"uniqueBinaries"`
+	TopBinaries     []BinaryCount    `json:"topBinaries,omitempty"`
+	TotalSyscalls   int64            `json:"totalSyscalls"`
+	SyscallCounts   map[string]int64 `json:"syscallCounts,omitempty"`
+	TotalFileAccess int64            `json:"totalFileAccess"`
+	FileOpCounts    map[string]int64 `json:"fileOpCounts,omitempty"`
+	ActionCounts    map[string]int64 `json:"actionCounts,omitempty"`
+}
+
+// BinaryCount tracks binary execution frequency
+type BinaryCount struct {
+	Binary string `json:"binary"`
+	Count  int64  `json:"count"`
+}
+
+// SubmitAggregatesResponse is the response from submitting aggregates
+type SubmitAggregatesResponse struct {
+	Success          bool   `json:"success"`
+	FlowSummaries    int    `json:"flowSummaries"`
+	ProcessSummaries int    `json:"processSummaries"`
+	Error            string `json:"error,omitempty"`
+}
+
+// SubmitAggregates sends aggregated telemetry to the SaaS platform
+func (c *Client) SubmitAggregates(ctx context.Context, aggregates *AggregatedTelemetry) (*SubmitAggregatesResponse, error) {
+	if aggregates == nil {
+		return &SubmitAggregatesResponse{Success: true}, nil
+	}
+
+	// Set cluster ID if not already set
+	if aggregates.ClusterID == "" {
+		aggregates.ClusterID = c.clusterID
+	}
+
+	body, err := json.Marshal(aggregates)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal aggregates: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, "POST", "/api/operator/telemetry/aggregates", body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to submit aggregates: %w", err)
+	}
+
+	var result SubmitAggregatesResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal aggregates response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("submit aggregates failed: %s", result.Error)
+	}
+
+	c.log.V(1).Info("Submitted aggregates to SaaS platform",
+		"flowSummaries", len(aggregates.FlowSummaries),
+		"processSummaries", len(aggregates.ProcessSummaries))
+
+	return &result, nil
+}
