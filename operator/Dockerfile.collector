@@ -1,5 +1,5 @@
-# Build stage
-FROM golang:1.22-alpine AS builder
+# Build stage - use target platform for native compilation
+FROM --platform=$TARGETPLATFORM golang:1.22-alpine AS builder
 
 WORKDIR /workspace
 
@@ -15,8 +15,8 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY internal/ internal/
 
-# Build collector (CGO enabled for SQLite)
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -o collector cmd/collector/main.go
+# Build collector (CGO enabled for SQLite) - native build, no cross-compile
+RUN CGO_ENABLED=1 go build -a -o collector cmd/collector/main.go
 
 # Runtime stage
 FROM alpine:3.19

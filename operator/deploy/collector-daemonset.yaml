@@ -116,7 +116,7 @@ spec:
 
       containers:
         - name: collector
-          image: ghcr.io/policy-hub/collector:latest
+          image: ghcr.io/henleda/policy-hub-collector:latest
           imagePullPolicy: IfNotPresent
 
           args:
