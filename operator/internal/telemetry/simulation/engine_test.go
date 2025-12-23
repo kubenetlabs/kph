@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -625,6 +626,498 @@ func TestEngine_MatchesPodSelector(t *testing.T) {
 			got := engine.matchesPodSelector(&tt.event, &tt.policy)
 			if got != tt.want {
 				t.Errorf("matchesPodSelector() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewEngine(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engine-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	engine := NewEngine(EngineConfig{
+		StorageManager: mgr,
+		Logger:         logr.Discard(),
+	})
+
+	if engine == nil {
+		t.Fatal("NewEngine() returned nil")
+	}
+	if engine.storageMgr == nil {
+		t.Error("storageMgr should not be nil")
+	}
+	if engine.parser == nil {
+		t.Error("parser should not be nil")
+	}
+}
+
+func TestEngine_Simulate(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engine-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	engine := NewEngine(EngineConfig{
+		StorageManager: mgr,
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+
+	req := &SimulationRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector:
+    matchLabels:
+      app: backend
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: frontend
+`,
+		PolicyType:     "CILIUM_NETWORK",
+		StartTime:      now.Add(-1 * time.Hour),
+		EndTime:        now,
+		Namespaces:     []string{"default"},
+		IncludeDetails: true,
+		MaxDetails:     50,
+	}
+
+	resp, err := engine.Simulate(ctx, req)
+	if err != nil {
+		t.Fatalf("Simulate() error = %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("Simulate() returned nil response")
+	}
+
+	// Check response structure
+	if resp.BreakdownByNamespace == nil {
+		t.Error("BreakdownByNamespace should not be nil")
+	}
+	if resp.BreakdownByVerdict == nil {
+		t.Error("BreakdownByVerdict should not be nil")
+	}
+	if resp.Duration == 0 {
+		t.Error("Duration should not be zero")
+	}
+}
+
+func TestEngine_Simulate_InvalidPolicy(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engine-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	engine := NewEngine(EngineConfig{
+		StorageManager: mgr,
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+
+	req := &SimulationRequest{
+		PolicyContent: "invalid yaml: [",
+		PolicyType:    "CILIUM_NETWORK",
+		StartTime:     now.Add(-1 * time.Hour),
+		EndTime:       now,
+	}
+
+	resp, err := engine.Simulate(ctx, req)
+	if err != nil {
+		t.Fatalf("Simulate() should not return error for invalid policy, got: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("Simulate() returned nil response")
+	}
+
+	if len(resp.Errors) == 0 {
+		t.Error("Expected errors in response for invalid policy")
+	}
+}
+
+func TestEngine_Simulate_DefaultMaxDetails(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "engine-sim-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mgr, err := storage.NewManager(storage.ManagerConfig{
+		BasePath: tmpDir,
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create storage manager: %v", err)
+	}
+	defer mgr.Close()
+
+	engine := NewEngine(EngineConfig{
+		StorageManager: mgr,
+		Logger:         logr.Discard(),
+	})
+
+	ctx := context.Background()
+	now := time.Now()
+
+	req := &SimulationRequest{
+		PolicyContent: `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-policy
+  namespace: default
+spec:
+  endpointSelector: {}
+`,
+		PolicyType:     "CILIUM_NETWORK",
+		StartTime:      now.Add(-1 * time.Hour),
+		EndTime:        now,
+		IncludeDetails: true,
+		MaxDetails:     0, // Should default to 100
+	}
+
+	resp, err := engine.Simulate(ctx, req)
+	if err != nil {
+		t.Fatalf("Simulate() error = %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("Simulate() returned nil response")
+	}
+}
+
+func TestEngine_UpdateNamespaceBreakdown(t *testing.T) {
+	engine := &Engine{}
+
+	breakdown := make(map[string]*NamespaceImpact)
+
+	testCases := []struct {
+		event  models.TelemetryEvent
+		result FlowSimulationResult
+	}{
+		{
+			event: models.TelemetryEvent{SrcNamespace: "default"},
+			result: FlowSimulationResult{
+				OriginalVerdict:  "ALLOWED",
+				SimulatedVerdict: "ALLOWED",
+				VerdictChanged:   false,
+			},
+		},
+		{
+			event: models.TelemetryEvent{SrcNamespace: "default"},
+			result: FlowSimulationResult{
+				OriginalVerdict:  "ALLOWED",
+				SimulatedVerdict: "DENIED",
+				VerdictChanged:   true,
+			},
+		},
+		{
+			event: models.TelemetryEvent{SrcNamespace: "production"},
+			result: FlowSimulationResult{
+				OriginalVerdict:  "DENIED",
+				SimulatedVerdict: "ALLOWED",
+				VerdictChanged:   true,
+			},
+		},
+		{
+			event: models.TelemetryEvent{SrcNamespace: ""}, // Should use "unknown"
+			result: FlowSimulationResult{
+				OriginalVerdict:  "DENIED",
+				SimulatedVerdict: "DENIED",
+				VerdictChanged:   false,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		engine.updateNamespaceBreakdown(breakdown, &tc.event, &tc.result)
+	}
+
+	// Check default namespace
+	defaultImpact := breakdown["default"]
+	if defaultImpact == nil {
+		t.Fatal("default namespace not found")
+	}
+	if defaultImpact.TotalFlows != 2 {
+		t.Errorf("default TotalFlows = %d, want 2", defaultImpact.TotalFlows)
+	}
+	if defaultImpact.AllowedCount != 1 {
+		t.Errorf("default AllowedCount = %d, want 1", defaultImpact.AllowedCount)
+	}
+	if defaultImpact.DeniedCount != 1 {
+		t.Errorf("default DeniedCount = %d, want 1", defaultImpact.DeniedCount)
+	}
+	if defaultImpact.WouldDeny != 1 {
+		t.Errorf("default WouldDeny = %d, want 1", defaultImpact.WouldDeny)
+	}
+	if defaultImpact.NoChange != 1 {
+		t.Errorf("default NoChange = %d, want 1", defaultImpact.NoChange)
+	}
+
+	// Check production namespace
+	prodImpact := breakdown["production"]
+	if prodImpact == nil {
+		t.Fatal("production namespace not found")
+	}
+	if prodImpact.TotalFlows != 1 {
+		t.Errorf("production TotalFlows = %d, want 1", prodImpact.TotalFlows)
+	}
+	if prodImpact.WouldAllow != 1 {
+		t.Errorf("production WouldAllow = %d, want 1", prodImpact.WouldAllow)
+	}
+
+	// Check unknown namespace
+	unknownImpact := breakdown["unknown"]
+	if unknownImpact == nil {
+		t.Fatal("unknown namespace not found")
+	}
+	if unknownImpact.TotalFlows != 1 {
+		t.Errorf("unknown TotalFlows = %d, want 1", unknownImpact.TotalFlows)
+	}
+	if unknownImpact.NoChange != 1 {
+		t.Errorf("unknown NoChange = %d, want 1", unknownImpact.NoChange)
+	}
+}
+
+func TestEngine_FlowMatchesRule_WithNamespaceSelector(t *testing.T) {
+	engine := &Engine{
+		log: logr.Discard(),
+	}
+
+	tests := []struct {
+		name  string
+		event models.TelemetryEvent
+		rule  PolicyRule
+		want  bool
+	}{
+		{
+			name: "namespace name matches",
+			event: models.TelemetryEvent{
+				SrcNamespace: "frontend",
+				DstNamespace: "backend",
+				DstPodLabels: map[string]string{"app": "api"},
+				DstPort:      8080,
+				Protocol:     "TCP",
+				Direction:    models.TrafficDirectionEgress,
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				NamespaceSelector: map[string]string{
+					"name": "backend",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "namespace name mismatch",
+			event: models.TelemetryEvent{
+				SrcNamespace: "frontend",
+				DstNamespace: "production",
+				DstPort:      8080,
+				Protocol:     "TCP",
+				Direction:    models.TrafficDirectionEgress,
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				NamespaceSelector: map[string]string{
+					"name": "backend",
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := engine.flowMatchesRule(&tt.event, &tt.rule)
+			if got != tt.want {
+				t.Errorf("flowMatchesRule() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngine_FlowMatchesRule_WithFQDN(t *testing.T) {
+	engine := &Engine{
+		log: logr.Discard(),
+	}
+
+	tests := []struct {
+		name  string
+		event models.TelemetryEvent
+		rule  PolicyRule
+		want  bool
+	}{
+		{
+			name: "FQDN matches wildcard",
+			event: models.TelemetryEvent{
+				DstDNSName: "api.example.com",
+				DstPort:    443,
+				Protocol:   "TCP",
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				ToFQDNs:   []string{"*.example.com"},
+			},
+			want: true,
+		},
+		{
+			name: "FQDN exact match",
+			event: models.TelemetryEvent{
+				DstDNSName: "api.example.com",
+				DstPort:    443,
+				Protocol:   "TCP",
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				ToFQDNs:   []string{"api.example.com"},
+			},
+			want: true,
+		},
+		{
+			name: "FQDN mismatch",
+			event: models.TelemetryEvent{
+				DstDNSName: "api.other.com",
+				DstPort:    443,
+				Protocol:   "TCP",
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				ToFQDNs:   []string{"*.example.com"},
+			},
+			want: false,
+		},
+		{
+			name: "no DNS name with FQDN rule",
+			event: models.TelemetryEvent{
+				DstDNSName: "",
+				DstPort:    443,
+				Protocol:   "TCP",
+			},
+			rule: PolicyRule{
+				Direction: "egress",
+				Action:    "allow",
+				ToFQDNs:   []string{"*.example.com"},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := engine.flowMatchesRule(&tt.event, &tt.rule)
+			if got != tt.want {
+				t.Errorf("flowMatchesRule() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngine_MatchFQDN(t *testing.T) {
+	tests := []struct {
+		hostname string
+		pattern  string
+		want     bool
+	}{
+		{"api.example.com", "*.example.com", true},
+		{"example.com", "*.example.com", false}, // suffix is ".example.com", not matching
+		{"api.other.com", "*.example.com", false},
+		{"api.example.com", "api.example.com", true},
+		{"other.example.com", "api.example.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.hostname+"_"+tt.pattern, func(t *testing.T) {
+			got := matchFQDN(tt.hostname, tt.pattern)
+			if got != tt.want {
+				t.Errorf("matchFQDN(%s, %s) = %v, want %v", tt.hostname, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuleDescription(t *testing.T) {
+	tests := []struct {
+		name     string
+		index    int
+		rule     PolicyRule
+		contains string
+	}{
+		{
+			name:  "ingress rule with port",
+			index: 0,
+			rule: PolicyRule{
+				Direction: "ingress",
+				ToPorts:   []PortRule{{Port: 8080, Protocol: "TCP"}},
+			},
+			contains: "ingress",
+		},
+		{
+			name:  "egress rule",
+			index: 1,
+			rule: PolicyRule{
+				Direction: "egress",
+			},
+			contains: "egress",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ruleDescription(tt.index, &tt.rule)
+			if got == "" {
+				t.Error("ruleDescription() returned empty string")
 			}
 		})
 	}
