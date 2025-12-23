@@ -546,3 +546,144 @@ func TestCategorizeSyscall(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessEventClassifier_ClassifyEvent_VerdictDropped(t *testing.T) {
+	c := NewProcessEventClassifier()
+
+	event := &models.TelemetryEvent{
+		EventType: models.EventTypeProcessExec,
+		SrcBinary: "/usr/bin/test",
+		Verdict:   models.VerdictDropped,
+	}
+
+	tags := c.ClassifyEvent(event)
+
+	// Should contain "dropped" tag
+	found := false
+	for _, tag := range tags {
+		if tag == "dropped" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'dropped' tag not found in %v", tags)
+	}
+}
+
+func TestEventNormalizer_EnrichFlowEvent_MorePorts(t *testing.T) {
+	n := NewEventNormalizer("test-node")
+
+	tests := []struct {
+		name       string
+		port       uint32
+		wantL7Type string
+	}{
+		{"MySQL port 3306", 3306, "MYSQL"},
+		{"PostgreSQL port 5432", 5432, "POSTGRESQL"},
+		{"Redis port 6379", 6379, "REDIS"},
+		{"MongoDB port 27017", 27017, "MONGODB"},
+		{"etcd port 2379", 2379, "ETCD"},
+		{"Kubernetes API port 6443", 6443, "KUBERNETES_API"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := &models.TelemetryEvent{
+				EventType: models.EventTypeFlow,
+				Protocol:  "TCP",
+				DstPort:   tt.port,
+			}
+
+			n.EnrichFlowEvent(event)
+
+			if event.L7Type != tt.wantL7Type {
+				t.Errorf("L7Type = %s, want %s", event.L7Type, tt.wantL7Type)
+			}
+		})
+	}
+}
+
+func TestCategorizeBinary_MoreTools(t *testing.T) {
+	tests := []struct {
+		binary   string
+		expected string
+	}{
+		{"/usr/bin/pip", "package_manager"},
+		{"/usr/bin/scp", "network_tool"},
+		{"/usr/bin/nc", "network_tool"},
+		{"/usr/bin/clang", "compiler"},
+		{"/usr/bin/rustc", "compiler"},
+		{"/usr/bin/javac", "compiler"},
+		{"/usr/bin/g++", "compiler"},
+	}
+
+	for _, tt := range tests {
+		result := categorizeBinary(tt.binary)
+		if result != tt.expected {
+			t.Errorf("categorizeBinary(%s) = %s, want %s", tt.binary, result, tt.expected)
+		}
+	}
+}
+
+func TestIsSensitivePath_MorePaths(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"/root/test.txt", true},
+		{"/root/.bashrc", true},
+		{"/var/run/secrets/kubernetes.io/token", true},
+		{"/proc/1/environ", true},
+		{"/sys/kernel/debug", true},
+		{"/var/run/docker.sock", false},
+		{"/opt/app/config.yaml", false},
+		{"/etc/hosts", false}, // Not in the sensitive paths list
+	}
+
+	for _, tt := range tests {
+		result := isSensitivePath(tt.path)
+		if result != tt.expected {
+			t.Errorf("isSensitivePath(%s) = %v, want %v", tt.path, result, tt.expected)
+		}
+	}
+}
+
+func TestProcessEventClassifier_ClassifyEvent_FileWrite(t *testing.T) {
+	c := NewProcessEventClassifier()
+
+	event := &models.TelemetryEvent{
+		EventType:     models.EventTypeFileAccess,
+		FilePath:      "/var/log/app.log",
+		FileOperation: "WRITE",
+	}
+
+	tags := c.ClassifyEvent(event)
+
+	// Should contain "file_write" tag
+	found := false
+	for _, tag := range tags {
+		if tag == "file_write" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'file_write' tag not found in %v", tags)
+	}
+}
+
+func TestEventNormalizer_NormalizeEvent_WithVerdict(t *testing.T) {
+	n := NewEventNormalizer("test-node")
+
+	event := &models.TelemetryEvent{
+		Verdict: models.VerdictAllowed,
+	}
+
+	n.NormalizeEvent(event)
+
+	// Existing verdict should be preserved
+	if event.Verdict != models.VerdictAllowed {
+		t.Errorf("Verdict = %s, want %s", event.Verdict, models.VerdictAllowed)
+	}
+}

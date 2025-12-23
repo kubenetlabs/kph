@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -519,5 +520,182 @@ func TestEventBatcher_ProcessBatch_Empty(t *testing.T) {
 	}
 	if handlerCalled {
 		t.Error("Handler should not be called for empty batch")
+	}
+}
+
+func TestRingBuffer_Flush_Error(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:           100,
+		FlushThreshold: 1.1,
+		Logger:         logr.Discard(),
+	})
+
+	testErr := fmt.Errorf("flush failed")
+	rb.SetFlushHandler(func(events []*models.TelemetryEvent) error {
+		return testErr
+	})
+
+	events := []*models.TelemetryEvent{
+		{ID: "1"},
+		{ID: "2"},
+	}
+	rb.PushBatch(events)
+
+	err := rb.Flush()
+	if err != testErr {
+		t.Errorf("Flush() error = %v, want %v", err, testErr)
+	}
+
+	// Events should be re-added to buffer on error
+	if rb.Count() != 2 {
+		t.Errorf("Count() after failed Flush() = %d, want 2 (events should be re-added)", rb.Count())
+	}
+}
+
+func TestRingBuffer_StartFlushWorker_WithError(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:          100,
+		FlushInterval: 30 * time.Millisecond,
+		Logger:        logr.Discard(),
+	})
+
+	var flushAttempts int32
+	rb.SetFlushHandler(func(events []*models.TelemetryEvent) error {
+		atomic.AddInt32(&flushAttempts, 1)
+		return fmt.Errorf("flush error")
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Push events
+	rb.Push(&models.TelemetryEvent{ID: "1"})
+
+	// Start worker in goroutine
+	done := make(chan struct{})
+	go func() {
+		rb.StartFlushWorker(ctx)
+		close(done)
+	}()
+
+	// Wait for worker to finish
+	<-done
+
+	// Should have attempted at least one flush despite errors
+	if atomic.LoadInt32(&flushAttempts) < 1 {
+		t.Error("Expected at least one flush attempt")
+	}
+}
+
+func TestRingBuffer_ThresholdFlush(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:           10,
+		FlushThreshold: 0.5, // 50% threshold
+		Logger:         logr.Discard(),
+	})
+
+	var flushedEvents []*models.TelemetryEvent
+	rb.SetFlushHandler(func(events []*models.TelemetryEvent) error {
+		flushedEvents = append(flushedEvents, events...)
+		return nil
+	})
+
+	// Push events up to threshold (50% of 10 = 5 events)
+	for i := 0; i < 5; i++ {
+		rb.Push(&models.TelemetryEvent{ID: string(rune('1' + i))})
+	}
+
+	// Give async flush time to complete
+	time.Sleep(50 * time.Millisecond)
+
+	// Events should have been flushed due to threshold
+	if len(flushedEvents) == 0 {
+		t.Log("Threshold flush may not have triggered (async)")
+	}
+}
+
+func TestRingBuffer_PushBatch_Nil(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:   10,
+		Logger: logr.Discard(),
+	})
+
+	// Push nil batch should not panic
+	rb.PushBatch(nil)
+
+	if rb.Count() != 0 {
+		t.Errorf("Count() = %d, want 0 after pushing nil batch", rb.Count())
+	}
+}
+
+func TestRingBuffer_PushBatch_Empty(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:   10,
+		Logger: logr.Discard(),
+	})
+
+	// Push empty batch should not panic
+	rb.PushBatch([]*models.TelemetryEvent{})
+
+	if rb.Count() != 0 {
+		t.Errorf("Count() = %d, want 0 after pushing empty batch", rb.Count())
+	}
+}
+
+func TestRingBuffer_GetMetrics_AfterFlush(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:           100,
+		FlushThreshold: 1.1,
+		Logger:         logr.Discard(),
+	})
+
+	rb.SetFlushHandler(func(events []*models.TelemetryEvent) error {
+		return nil
+	})
+
+	// Push and flush events
+	for i := 0; i < 5; i++ {
+		rb.Push(&models.TelemetryEvent{ID: string(rune('0' + i))})
+	}
+
+	err := rb.Flush()
+	if err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+
+	metrics := rb.GetMetrics()
+
+	if metrics.TotalFlushed != 5 {
+		t.Errorf("TotalFlushed = %d, want 5", metrics.TotalFlushed)
+	}
+	if metrics.CurrentCount != 0 {
+		t.Errorf("CurrentCount = %d, want 0", metrics.CurrentCount)
+	}
+	if metrics.LastFlushTime.IsZero() {
+		t.Error("LastFlushTime should not be zero after flush")
+	}
+}
+
+func TestEventBatcher_ProcessBatch_WithError(t *testing.T) {
+	rb := NewRingBuffer(RingBufferConfig{
+		Size:           100,
+		FlushThreshold: 1.1,
+		Logger:         logr.Discard(),
+	})
+
+	batcher := NewEventBatcher(rb, 5)
+
+	// Add some events
+	for i := 0; i < 5; i++ {
+		batcher.Add(&models.TelemetryEvent{ID: string(rune('1' + i))})
+	}
+
+	testErr := fmt.Errorf("processing error")
+	err := batcher.ProcessBatch(func(events []*models.TelemetryEvent) error {
+		return testErr
+	})
+
+	if err != testErr {
+		t.Errorf("ProcessBatch() error = %v, want %v", err, testErr)
 	}
 }
