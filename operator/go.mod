@@ -4,6 +4,7 @@ go 1.22.1
 
 require (
 	github.com/cilium/cilium v1.16.5
+	github.com/cilium/tetragon/api v1.2.0
 	github.com/go-logr/logr v1.4.2
 	github.com/go-logr/zapr v1.3.0
 	github.com/google/uuid v1.6.0

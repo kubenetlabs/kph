@@ -166,7 +166,34 @@ func main() {
 		}()
 	}
 
-	// TODO: Initialize and start Tetragon client in Phase 3
+	// Initialize event normalizer
+	normalizer := collector.NewEventNormalizer(cfg.NodeName)
+
+	// Initialize and start Tetragon client
+	if cfg.TetragonEnabled {
+		tetragonClient := collector.NewTetragonClient(collector.TetragonClientConfig{
+			Address:            cfg.TetragonAddress,
+			NodeName:           cfg.NodeName,
+			NamespaceFilter:    cfg.NamespaceFilter,
+			CollectProcessExec: true,
+			CollectProcessExit: true,
+			CollectKprobes:     true,
+			Logger:             log,
+		})
+
+		tetragonClient.SetEventHandler(func(event *models.TelemetryEvent) {
+			// Normalize and enrich the event
+			normalizer.NormalizeEvent(event)
+			normalizer.EnrichProcessEvent(event)
+			buffer.Push(event)
+		})
+
+		go func() {
+			if err := runTetragonCollector(ctx, tetragonClient, log); err != nil && ctx.Err() == nil {
+				log.Error(err, "Tetragon collector failed")
+			}
+		}()
+	}
 
 	// Start health server
 	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
@@ -293,6 +320,40 @@ func runHubbleCollector(ctx context.Context, client *collector.HubbleClient, log
 
 		if err != nil {
 			log.Error(err, "Flow stream error, reconnecting")
+			if err := client.Reconnect(ctx); err != nil {
+				return fmt.Errorf("reconnection failed: %w", err)
+			}
+		}
+	}
+}
+
+func runTetragonCollector(ctx context.Context, client *collector.TetragonClient, log logr.Logger) error {
+	// Connect with retry
+	connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := client.Connect(connectCtx); err != nil {
+		return fmt.Errorf("failed to connect to Tetragon: %w", err)
+	}
+	defer client.Close()
+
+	log.Info("Connected to Tetragon, starting event collection")
+
+	// Stream events with automatic reconnection
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		err := client.StreamEvents(ctx)
+		if ctx.Err() != nil {
+			return nil // Context cancelled, clean shutdown
+		}
+
+		if err != nil {
+			log.Error(err, "Event stream error, reconnecting")
 			if err := client.Reconnect(ctx); err != nil {
 				return fmt.Errorf("reconnection failed: %w", err)
 			}
