@@ -5,6 +5,7 @@ import (
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/go-logr/logr"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/policy-hub/operator/internal/telemetry/models"
 )
@@ -482,5 +483,437 @@ func TestTetragonClient_KprobeToEvent_Nil(t *testing.T) {
 	event := client.kprobeToEvent(nil)
 	if event != nil {
 		t.Error("kprobeToEvent(nil) should return nil")
+	}
+}
+
+func TestTetragonClient_ProcessExecToEvent_WithProcess(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	exec := &tetragon.ProcessExec{
+		Process: &tetragon.Process{
+			Binary:    "/usr/bin/curl",
+			Arguments: "https://example.com",
+			Pid:       &wrapperspb.UInt32Value{Value: 1234},
+			Uid:       &wrapperspb.UInt32Value{Value: 1000},
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+				PodLabels: map[string]string{"app": "test"},
+				Container: &tetragon.Container{Name: "main"},
+			},
+		},
+		Parent: &tetragon.Process{
+			Binary: "/bin/bash",
+		},
+	}
+
+	event := client.processExecToEvent(exec)
+
+	if event == nil {
+		t.Fatal("processExecToEvent() returned nil")
+	}
+	if event.EventType != models.EventTypeProcessExec {
+		t.Errorf("EventType = %s, want process_exec", event.EventType)
+	}
+	if event.NodeName != "test-node" {
+		t.Errorf("NodeName = %s, want test-node", event.NodeName)
+	}
+	if event.Source != models.SourceTetragon {
+		t.Errorf("Source = %s, want tetragon", event.Source)
+	}
+	if event.SrcBinary != "/usr/bin/curl" {
+		t.Errorf("SrcBinary = %s, want /usr/bin/curl", event.SrcBinary)
+	}
+	if event.SrcPID != 1234 {
+		t.Errorf("SrcPID = %d, want 1234", event.SrcPID)
+	}
+	if event.SrcUID != 1000 {
+		t.Errorf("SrcUID = %d, want 1000", event.SrcUID)
+	}
+	if event.SrcNamespace != "default" {
+		t.Errorf("SrcNamespace = %s, want default", event.SrcNamespace)
+	}
+	if event.SrcPodName != "test-pod" {
+		t.Errorf("SrcPodName = %s, want test-pod", event.SrcPodName)
+	}
+	if event.Action != "parent=/bin/bash" {
+		t.Errorf("Action = %s, want parent=/bin/bash", event.Action)
+	}
+}
+
+func TestTetragonClient_ProcessExecToEvent_NilProcess(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	exec := &tetragon.ProcessExec{
+		Process: nil,
+	}
+
+	event := client.processExecToEvent(exec)
+	if event != nil {
+		t.Error("processExecToEvent with nil process should return nil")
+	}
+}
+
+func TestTetragonClient_ProcessExitToEvent_WithSignal(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	exit := &tetragon.ProcessExit{
+		Process: &tetragon.Process{
+			Binary:    "/usr/bin/curl",
+			Arguments: "https://example.com",
+			Pid:       &wrapperspb.UInt32Value{Value: 1234},
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		Signal: "SIGTERM",
+	}
+
+	event := client.processExitToEvent(exit)
+
+	if event == nil {
+		t.Fatal("processExitToEvent() returned nil")
+	}
+	if event.EventType != models.EventTypeProcessExec {
+		t.Errorf("EventType = %s, want process_exec", event.EventType)
+	}
+	if event.Action != "exit:signal=SIGTERM" {
+		t.Errorf("Action = %s, want exit:signal=SIGTERM", event.Action)
+	}
+	if event.SrcBinary != "/usr/bin/curl" {
+		t.Errorf("SrcBinary = %s, want /usr/bin/curl", event.SrcBinary)
+	}
+}
+
+func TestTetragonClient_ProcessExitToEvent_WithStatus(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	exit := &tetragon.ProcessExit{
+		Process: &tetragon.Process{
+			Binary: "/usr/bin/curl",
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		Status: 0,
+	}
+
+	event := client.processExitToEvent(exit)
+
+	if event == nil {
+		t.Fatal("processExitToEvent() returned nil")
+	}
+	if event.Action != "exit:status=0" {
+		t.Errorf("Action = %s, want exit:status=0", event.Action)
+	}
+}
+
+func TestTetragonClient_ProcessExitToEvent_NilProcess(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	exit := &tetragon.ProcessExit{
+		Process: nil,
+	}
+
+	event := client.processExitToEvent(exit)
+	if event != nil {
+		t.Error("processExitToEvent with nil process should return nil")
+	}
+}
+
+func TestTetragonClient_KprobeToEvent_WithProcess(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	kprobe := &tetragon.ProcessKprobe{
+		Process: &tetragon.Process{
+			Binary: "/usr/bin/cat",
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		FunctionName: "sys_connect",
+		Args: []*tetragon.KprobeArgument{
+			{Arg: &tetragon.KprobeArgument_IntArg{IntArg: 3}},
+		},
+		Action: tetragon.KprobeAction_KPROBE_ACTION_POST,
+	}
+
+	event := client.kprobeToEvent(kprobe)
+
+	if event == nil {
+		t.Fatal("kprobeToEvent() returned nil")
+	}
+	if event.EventType != models.EventTypeSyscall {
+		t.Errorf("EventType = %s, want syscall", event.EventType)
+	}
+	if event.Syscall != "sys_connect" {
+		t.Errorf("Syscall = %s, want sys_connect", event.Syscall)
+	}
+	if event.Verdict != models.VerdictAllowed {
+		t.Errorf("Verdict = %s, want allowed", event.Verdict)
+	}
+	if len(event.SyscallArgs) != 1 {
+		t.Errorf("SyscallArgs length = %d, want 1", len(event.SyscallArgs))
+	}
+}
+
+func TestTetragonClient_KprobeToEvent_FileOperation(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	kprobe := &tetragon.ProcessKprobe{
+		Process: &tetragon.Process{
+			Binary: "/usr/bin/cat",
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		FunctionName: "sys_openat",
+		Args: []*tetragon.KprobeArgument{
+			{Arg: &tetragon.KprobeArgument_FileArg{
+				FileArg: &tetragon.KprobeFile{Path: "/etc/passwd"},
+			}},
+		},
+		Action: tetragon.KprobeAction_KPROBE_ACTION_POST,
+	}
+
+	event := client.kprobeToEvent(kprobe)
+
+	if event == nil {
+		t.Fatal("kprobeToEvent() returned nil")
+	}
+	if event.EventType != models.EventTypeFileAccess {
+		t.Errorf("EventType = %s, want file_access", event.EventType)
+	}
+	if event.FileOperation != "sys_openat" {
+		t.Errorf("FileOperation = %s, want sys_openat", event.FileOperation)
+	}
+	if event.FilePath != "/etc/passwd" {
+		t.Errorf("FilePath = %s, want /etc/passwd", event.FilePath)
+	}
+}
+
+func TestTetragonClient_KprobeToEvent_Sigkill(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	kprobe := &tetragon.ProcessKprobe{
+		Process: &tetragon.Process{
+			Binary: "/usr/bin/malware",
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		FunctionName: "sys_execve",
+		Action:       tetragon.KprobeAction_KPROBE_ACTION_SIGKILL,
+	}
+
+	event := client.kprobeToEvent(kprobe)
+
+	if event == nil {
+		t.Fatal("kprobeToEvent() returned nil")
+	}
+	if event.Verdict != models.VerdictDenied {
+		t.Errorf("Verdict = %s, want denied", event.Verdict)
+	}
+	if event.Action != "SIGKILL" {
+		t.Errorf("Action = %s, want SIGKILL", event.Action)
+	}
+}
+
+func TestTetragonClient_KprobeToEvent_Override(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	kprobe := &tetragon.ProcessKprobe{
+		Process: &tetragon.Process{
+			Binary: "/usr/bin/app",
+			Pod: &tetragon.Pod{
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+		},
+		FunctionName: "sys_open",
+		Action:       tetragon.KprobeAction_KPROBE_ACTION_OVERRIDE,
+	}
+
+	event := client.kprobeToEvent(kprobe)
+
+	if event == nil {
+		t.Fatal("kprobeToEvent() returned nil")
+	}
+	if event.Verdict != models.VerdictDenied {
+		t.Errorf("Verdict = %s, want denied", event.Verdict)
+	}
+	if event.Action != "OVERRIDE" {
+		t.Errorf("Action = %s, want OVERRIDE", event.Action)
+	}
+}
+
+func TestTetragonClient_KprobeToEvent_NilProcess(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	kprobe := &tetragon.ProcessKprobe{
+		Process: nil,
+	}
+
+	event := client.kprobeToEvent(kprobe)
+	if event != nil {
+		t.Error("kprobeToEvent with nil process should return nil")
+	}
+}
+
+func TestTetragonClient_ResponseToEvent_ProcessExec(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	resp := &tetragon.GetEventsResponse{
+		Event: &tetragon.GetEventsResponse_ProcessExec{
+			ProcessExec: &tetragon.ProcessExec{
+				Process: &tetragon.Process{
+					Binary: "/usr/bin/test",
+					Pod: &tetragon.Pod{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+				},
+			},
+		},
+	}
+
+	event := client.responseToEvent(resp)
+
+	if event == nil {
+		t.Fatal("responseToEvent() returned nil")
+	}
+	if event.EventType != models.EventTypeProcessExec {
+		t.Errorf("EventType = %s, want process_exec", event.EventType)
+	}
+}
+
+func TestTetragonClient_ResponseToEvent_ProcessExit(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	resp := &tetragon.GetEventsResponse{
+		Event: &tetragon.GetEventsResponse_ProcessExit{
+			ProcessExit: &tetragon.ProcessExit{
+				Process: &tetragon.Process{
+					Binary: "/usr/bin/test",
+					Pod: &tetragon.Pod{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+				},
+				Status: 0,
+			},
+		},
+	}
+
+	event := client.responseToEvent(resp)
+
+	if event == nil {
+		t.Fatal("responseToEvent() returned nil")
+	}
+	if event.Action != "exit:status=0" {
+		t.Errorf("Action = %s, want exit:status=0", event.Action)
+	}
+}
+
+func TestTetragonClient_ResponseToEvent_ProcessKprobe(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	resp := &tetragon.GetEventsResponse{
+		Event: &tetragon.GetEventsResponse_ProcessKprobe{
+			ProcessKprobe: &tetragon.ProcessKprobe{
+				Process: &tetragon.Process{
+					Binary: "/usr/bin/test",
+					Pod: &tetragon.Pod{
+						Namespace: "default",
+						Name:      "test-pod",
+					},
+				},
+				FunctionName: "sys_read",
+				Action:       tetragon.KprobeAction_KPROBE_ACTION_POST,
+			},
+		},
+	}
+
+	event := client.responseToEvent(resp)
+
+	if event == nil {
+		t.Fatal("responseToEvent() returned nil")
+	}
+	if event.Syscall != "sys_read" {
+		t.Errorf("Syscall = %s, want sys_read", event.Syscall)
+	}
+}
+
+func TestTetragonClient_ResponseToEvent_UnknownType(t *testing.T) {
+	client := NewTetragonClient(TetragonClientConfig{
+		Address:  "unix:///var/run/tetragon/tetragon.sock",
+		NodeName: "test-node",
+		Logger:   logr.Discard(),
+	})
+
+	// Empty response with no event set
+	resp := &tetragon.GetEventsResponse{}
+
+	event := client.responseToEvent(resp)
+
+	if event != nil {
+		t.Error("responseToEvent with unknown type should return nil")
 	}
 }
