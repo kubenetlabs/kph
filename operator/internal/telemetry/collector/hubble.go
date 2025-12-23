@@ -332,7 +332,7 @@ func (h *HubbleClient) flowToEvent(flow *flowpb.Flow) *models.TelemetryEvent {
 	}
 
 	// Summary for tracing
-	event.TraceID = fmt.Sprintf("%d", flow.GetTraceContext().GetParent().GetTraceId())
+	event.TraceID = flow.GetTraceContext().GetParent().GetTraceId()
 
 	return event
 }
