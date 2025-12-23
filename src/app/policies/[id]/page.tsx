@@ -51,6 +51,8 @@ export default function PolicyDetailPage() {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isSimulationModalOpen, setIsSimulationModalOpen] = useState(false);
+  const [simulationDays, setSimulationDays] = useState(7);
 
   const utils = trpc.useUtils();
 
@@ -120,6 +122,49 @@ export default function PolicyDetailPage() {
 
   const handleArchive = () => {
     archiveMutation.mutate({ id: policyId });
+  };
+
+  const handleRunSimulation = async () => {
+    setIsSimulationModalOpen(true);
+  };
+
+  const handleStartSimulation = async () => {
+    try {
+      const response = await fetch("/api/operator/simulation/pending", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          policyId: policy?.id,
+          clusterId: policy?.clusterId,
+          daysToAnalyze: simulationDays,
+        }),
+      });
+      if (response.ok) {
+        setIsSimulationModalOpen(false);
+        void utils.policy.getById.invalidate({ id: policyId });
+        router.push("/simulation");
+      }
+    } catch (error) {
+      console.error("Failed to start simulation:", error);
+    }
+  };
+
+  const handleExportYAML = () => {
+    if (!policy) return;
+    const blob = new Blob([policy.content], { type: "application/x-yaml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${policy.name.toLowerCase().replace(/\s+/g, "-")}.yaml`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleClonePolicy = () => {
+    if (!policy) return;
+    router.push(`/policies/new?cloneFrom=${policy.id}`);
   };
 
   if (isLoading) {
@@ -397,7 +442,7 @@ export default function PolicyDetailPage() {
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="secondary" className="w-full justify-start">
+              <Button variant="secondary" className="w-full justify-start" onClick={handleRunSimulation}>
                 <svg
                   className="mr-2 h-4 w-4"
                   fill="none"
@@ -413,7 +458,7 @@ export default function PolicyDetailPage() {
                 </svg>
                 Run Simulation
               </Button>
-              <Button variant="secondary" className="w-full justify-start">
+              <Button variant="secondary" className="w-full justify-start" onClick={handleClonePolicy}>
                 <svg
                   className="mr-2 h-4 w-4"
                   fill="none"
@@ -429,7 +474,7 @@ export default function PolicyDetailPage() {
                 </svg>
                 Clone Policy
               </Button>
-              <Button variant="secondary" className="w-full justify-start">
+              <Button variant="secondary" className="w-full justify-start" onClick={handleExportYAML}>
                 <svg
                   className="mr-2 h-4 w-4"
                   fill="none"
@@ -513,6 +558,49 @@ export default function PolicyDetailPage() {
               {deleteMutation.error.message}
             </p>
           )}
+        </div>
+      </Modal>
+
+      {/* Simulation Modal */}
+      <Modal
+        isOpen={isSimulationModalOpen}
+        onClose={() => setIsSimulationModalOpen(false)}
+        title="Run Policy Simulation"
+        description="Test this policy against historical network traffic"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Days of traffic to analyze
+            </label>
+            <select
+              value={simulationDays}
+              onChange={(e) => setSimulationDays(Number(e.target.value))}
+              className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
+            >
+              <option value={1}>Last 24 hours</option>
+              <option value={3}>Last 3 days</option>
+              <option value={7}>Last 7 days</option>
+            </select>
+          </div>
+          <div className="rounded-md bg-accent/10 p-3">
+            <p className="text-sm text-muted">
+              The simulation will replay historical network flows against this policy
+              to show what would be allowed or denied if deployed.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setIsSimulationModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleStartSimulation}>
+              Start Simulation
+            </Button>
+          </div>
         </div>
       </Modal>
     </AppShell>
