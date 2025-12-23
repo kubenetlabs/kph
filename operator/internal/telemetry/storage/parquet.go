@@ -482,22 +482,39 @@ func (pr *ParquetReader) ReadEvents(ctx context.Context, req models.QueryEventsR
 	startDate := req.StartTime.UTC().Format("2006-01-02")
 	endDate := req.EndTime.UTC().Format("2006-01-02")
 
+	pr.log.Info("ReadEvents: starting",
+		"startDate", startDate,
+		"endDate", endDate,
+		"basePath", pr.basePath,
+	)
+
 	// Iterate through date directories
 	current := req.StartTime.UTC()
+	iterations := 0
 	for !current.After(req.EndTime.UTC()) {
+		iterations++
+		if iterations > 100 {
+			pr.log.Error(nil, "ReadEvents: too many iterations, breaking loop")
+			break
+		}
+
 		dateStr := current.Format("2006-01-02")
 		if dateStr >= startDate && dateStr <= endDate {
 			dateDir := filepath.Join(pr.basePath, dateStr)
+			pr.log.Info("ReadEvents: processing date directory", "date", dateStr, "dir", dateDir)
 
 			events, err := pr.readDateDirectory(ctx, dateDir, req)
 			if err != nil {
 				pr.log.Error(err, "Error reading date directory", "date", dateStr)
 			} else {
+				pr.log.Info("ReadEvents: got events from directory", "date", dateStr, "count", len(events))
 				allEvents = append(allEvents, events...)
 			}
 		}
 		current = current.Add(24 * time.Hour)
 	}
+
+	pr.log.Info("ReadEvents: finished iterating directories", "iterations", iterations, "totalEvents", len(allEvents))
 
 	// Apply limit and offset
 	totalCount := int64(len(allEvents))
@@ -527,16 +544,23 @@ func (pr *ParquetReader) ReadEvents(ctx context.Context, req models.QueryEventsR
 
 // readDateDirectory reads all Parquet files in a date directory.
 func (pr *ParquetReader) readDateDirectory(ctx context.Context, dateDir string, req models.QueryEventsRequest) ([]*models.TelemetryEvent, error) {
+	pr.log.Info("readDateDirectory: starting", "dir", dateDir)
+
 	entries, err := os.ReadDir(dateDir)
 	if os.IsNotExist(err) {
+		pr.log.Info("readDateDirectory: directory does not exist", "dir", dateDir)
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
+	pr.log.Info("readDateDirectory: found entries", "count", len(entries))
+
 	var events []*models.TelemetryEvent
-	for _, entry := range entries {
+	for i, entry := range entries {
+		pr.log.Info("readDateDirectory: processing entry", "index", i, "name", entry.Name())
+
 		select {
 		case <-ctx.Done():
 			return events, ctx.Err()
@@ -561,11 +585,15 @@ func (pr *ParquetReader) readDateDirectory(ctx context.Context, dateDir string, 
 
 // readParquetFile reads events from a single Parquet file.
 func (pr *ParquetReader) readParquetFile(ctx context.Context, filePath string, req models.QueryEventsRequest) ([]*models.TelemetryEvent, error) {
+	pr.log.Info("readParquetFile: opening file", "path", filePath)
+
 	fr, err := local.NewLocalFileReader(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer fr.Close()
+
+	pr.log.Info("readParquetFile: creating parquet reader")
 
 	pqReader, err := reader.NewParquetReader(fr, new(ParquetEvent), int64(4))
 	if err != nil {
@@ -574,6 +602,15 @@ func (pr *ParquetReader) readParquetFile(ctx context.Context, filePath string, r
 	defer pqReader.ReadStop()
 
 	numRows := int(pqReader.GetNumRows())
+	pr.log.Info("readParquetFile: file info", "numRows", numRows)
+
+	// Limit max rows to prevent memory issues with large files
+	maxRows := 100000
+	if numRows > maxRows {
+		pr.log.Info("readParquetFile: limiting rows", "original", numRows, "limited", maxRows)
+		numRows = maxRows
+	}
+
 	var events []*models.TelemetryEvent
 
 	// Read in batches
@@ -607,6 +644,7 @@ func (pr *ParquetReader) readParquetFile(ctx context.Context, filePath string, r
 		}
 	}
 
+	pr.log.Info("readParquetFile: complete", "matchedEvents", len(events))
 	return events, nil
 }
 

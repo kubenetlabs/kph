@@ -187,6 +187,11 @@ func (m *Manager) registerCompletedFile(stats ParquetWriterStats) {
 
 // Query retrieves events matching the query.
 func (m *Manager) Query(ctx context.Context, req models.QueryEventsRequest) (*models.QueryEventsResponse, error) {
+	m.log.Info("Query: starting index lookup",
+		"startTime", req.StartTime,
+		"endTime", req.EndTime,
+	)
+
 	// First try to use index to find relevant files
 	files, err := m.index.GetParquetFilesForQuery(ctx, req)
 	if err != nil {
@@ -195,7 +200,10 @@ func (m *Manager) Query(ctx context.Context, req models.QueryEventsRequest) (*mo
 		return m.reader.ReadEvents(ctx, req)
 	}
 
+	m.log.Info("Query: index lookup complete", "fileCount", len(files))
+
 	if len(files) == 0 {
+		m.log.Info("Query: no matching files found")
 		return &models.QueryEventsResponse{
 			Events:     nil,
 			TotalCount: 0,
@@ -203,8 +211,17 @@ func (m *Manager) Query(ctx context.Context, req models.QueryEventsRequest) (*mo
 		}, nil
 	}
 
+	m.log.Info("Query: reading events from parquet files", "files", files)
+
 	// Read from specific files
-	return m.reader.ReadEvents(ctx, req)
+	resp, err := m.reader.ReadEvents(ctx, req)
+	if err != nil {
+		m.log.Error(err, "Query: ReadEvents failed")
+		return nil, err
+	}
+
+	m.log.Info("Query: complete", "eventCount", len(resp.Events))
+	return resp, nil
 }
 
 // GetStats returns storage statistics.

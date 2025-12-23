@@ -65,14 +65,23 @@ func (e *Engine) Simulate(ctx context.Context, req *SimulationRequest) (*Simulat
 		Limit:      0, // Get all matching events
 	}
 
+	e.log.Info("Querying storage for historical flows",
+		"startTime", req.StartTime,
+		"endTime", req.EndTime,
+		"namespaces", req.Namespaces,
+	)
+
 	result, err := e.storageMgr.Query(ctx, queryReq)
 	if err != nil {
+		e.log.Error(err, "Storage query failed")
 		return &SimulationResponse{
 			Errors:         []string{"Failed to query historical data: " + err.Error()},
 			SimulationTime: startTime,
 			Duration:       time.Since(startTime),
 		}, nil
 	}
+
+	e.log.Info("Storage query completed", "eventCount", len(result.Events))
 
 	// Initialize response
 	response := &SimulationResponse{
