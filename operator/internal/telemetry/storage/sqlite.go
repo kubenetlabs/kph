@@ -535,6 +535,76 @@ func (idx *SQLiteIndex) Vacuum() error {
 	return err
 }
 
+// DeleteEventsOlderThan deletes events older than the given Unix timestamp.
+// Returns the number of events deleted.
+func (idx *SQLiteIndex) DeleteEventsOlderThan(ctx context.Context, cutoffTimestamp int64) (int64, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	result, err := idx.db.ExecContext(ctx,
+		`DELETE FROM event_index WHERE timestamp < ?`,
+		cutoffTimestamp,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old events: %w", err)
+	}
+
+	deleted, _ := result.RowsAffected()
+	return deleted, nil
+}
+
+// DeleteHourlyStatsOlderThan deletes hourly stats older than the given hour string (format: 2006-01-02T15).
+func (idx *SQLiteIndex) DeleteHourlyStatsOlderThan(ctx context.Context, cutoffHour string) (int64, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	result, err := idx.db.ExecContext(ctx,
+		`DELETE FROM hourly_stats WHERE hour < ?`,
+		cutoffHour,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old hourly stats: %w", err)
+	}
+
+	deleted, _ := result.RowsAffected()
+	return deleted, nil
+}
+
+// GetDatabaseSize returns the total size of the SQLite database files in bytes.
+func (idx *SQLiteIndex) GetDatabaseSize() (int64, error) {
+	idx.mu.RLock()
+	dbPath := idx.dbPath
+	idx.mu.RUnlock()
+
+	var totalSize int64
+
+	// Main database file
+	if info, err := os.Stat(dbPath); err == nil {
+		totalSize += info.Size()
+	}
+
+	// WAL file
+	if info, err := os.Stat(dbPath + "-wal"); err == nil {
+		totalSize += info.Size()
+	}
+
+	// SHM file
+	if info, err := os.Stat(dbPath + "-shm"); err == nil {
+		totalSize += info.Size()
+	}
+
+	return totalSize, nil
+}
+
+// Checkpoint forces a WAL checkpoint to reduce WAL file size.
+func (idx *SQLiteIndex) Checkpoint() error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	_, err := idx.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}
+
 // Close closes the SQLite database.
 func (idx *SQLiteIndex) Close() error {
 	idx.mu.Lock()

@@ -17,6 +17,10 @@ import (
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/policy-hub/operator/internal/saas"
 	"github.com/policy-hub/operator/internal/telemetry/aggregator"
@@ -25,6 +29,7 @@ import (
 	"github.com/policy-hub/operator/internal/telemetry/query"
 	"github.com/policy-hub/operator/internal/telemetry/simulation"
 	"github.com/policy-hub/operator/internal/telemetry/storage"
+	"github.com/policy-hub/operator/internal/telemetry/validation"
 )
 
 const (
@@ -80,6 +85,13 @@ type Config struct {
 	// Simulation configuration
 	SimulationEnabled      bool
 	SimulationPollInterval time.Duration
+
+	// Validation configuration
+	ValidationEnabled      bool
+	ValidationFlushInterval time.Duration
+	ValidationPolicyRefresh time.Duration
+	ValidationEventBuffer   int
+	ValidationSampleRate    int
 
 	// Namespace filtering
 	NamespaceFilter []string
@@ -240,6 +252,52 @@ func main() {
 		log.Info("Simulation worker disabled")
 	}
 
+	// Initialize and start validation agent
+	var validationAgent *validation.Agent
+	if cfg.ValidationEnabled && cfg.SaaSEnabled && cfg.SaaSEndpoint != "" {
+		// Create Kubernetes client for fetching policies
+		k8sConfig, err := rest.InClusterConfig()
+		if err != nil {
+			log.Error(err, "Failed to get in-cluster config for validation agent")
+		} else {
+			// Create scheme with Cilium CRDs registered
+			scheme := runtime.NewScheme()
+			if err := ciliumv2.AddToScheme(scheme); err != nil {
+				log.Error(err, "Failed to register Cilium types in scheme")
+			}
+
+			k8sClient, err := client.New(k8sConfig, client.Options{Scheme: scheme})
+			if err != nil {
+				log.Error(err, "Failed to create Kubernetes client for validation agent")
+			} else {
+				// Create validation agent
+				validationAgent = validation.NewAgent(validation.AgentOptions{
+					Client:          k8sClient,
+					SaaSEndpoint:    cfg.SaaSEndpoint,
+					APIKey:          cfg.SaaSAPIKey,
+					ClusterID:       cfg.ClusterID,
+					FlushInterval:   cfg.ValidationFlushInterval,
+					PolicyRefresh:   cfg.ValidationPolicyRefresh,
+					EventBufferSize: cfg.ValidationEventBuffer,
+					EventSampleRate: cfg.ValidationSampleRate,
+					Logger:          log,
+				})
+
+				if err := validationAgent.Start(ctx); err != nil {
+					log.Error(err, "Failed to start validation agent")
+				} else {
+					log.Info("Validation agent enabled",
+						"flushInterval", cfg.ValidationFlushInterval,
+						"policyRefresh", cfg.ValidationPolicyRefresh,
+						"sampleRate", cfg.ValidationSampleRate,
+					)
+				}
+			}
+		}
+	} else {
+		log.Info("Validation agent disabled")
+	}
+
 	// Initialize and start Hubble client
 	if cfg.HubbleEnabled {
 		hubbleClient := collector.NewHubbleClient(collector.HubbleClientConfig{
@@ -255,6 +313,10 @@ func main() {
 			// Also send to SaaS aggregator
 			if saasSender != nil {
 				saasSender.AddEvent(event)
+			}
+			// Also send to validation agent for policy matching
+			if validationAgent != nil {
+				validationAgent.ProcessEvent(event)
 			}
 		})
 
@@ -302,7 +364,7 @@ func main() {
 	go startHealthServer(cfg.HealthPort, buffer, storageMgr, log)
 
 	// Start metrics server
-	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, queryServer, simWorker, log)
+	go startMetricsServer(cfg.MetricsPort, buffer, storageMgr, saasSender, queryServer, simWorker, validationAgent, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -324,6 +386,11 @@ func main() {
 		if err := saasSender.ForceFlush(context.Background()); err != nil {
 			log.Error(err, "Final SaaS sender flush failed")
 		}
+	}
+
+	// Stop validation agent (triggers final flush)
+	if validationAgent != nil {
+		validationAgent.Stop()
 	}
 
 	log.Info("Collector stopped")
@@ -371,6 +438,13 @@ func parseFlags() *Config {
 	// Simulation flags
 	flag.BoolVar(&cfg.SimulationEnabled, "simulation-enabled", getEnvBool("SIMULATION_ENABLED", true), "Enable simulation worker")
 	flag.DurationVar(&cfg.SimulationPollInterval, "simulation-poll-interval", getEnvDuration("SIMULATION_POLL_INTERVAL", 30*time.Second), "Simulation poll interval")
+
+	// Validation flags
+	flag.BoolVar(&cfg.ValidationEnabled, "validation-enabled", getEnvBool("VALIDATION_ENABLED", true), "Enable validation agent")
+	flag.DurationVar(&cfg.ValidationFlushInterval, "validation-flush-interval", getEnvDuration("VALIDATION_FLUSH_INTERVAL", time.Minute), "Validation data flush interval")
+	flag.DurationVar(&cfg.ValidationPolicyRefresh, "validation-policy-refresh", getEnvDuration("VALIDATION_POLICY_REFRESH", 30*time.Second), "Policy refresh interval for validation")
+	flag.IntVar(&cfg.ValidationEventBuffer, "validation-event-buffer", getEnvInt("VALIDATION_EVENT_BUFFER", 1000), "Validation event buffer size")
+	flag.IntVar(&cfg.ValidationSampleRate, "validation-sample-rate", getEnvInt("VALIDATION_SAMPLE_RATE", 10), "Validation event sample rate (1 in N)")
 
 	// Logging
 	flag.StringVar(&cfg.LogLevel, "log-level", getEnv("LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
@@ -507,7 +581,7 @@ func startHealthServer(port int, buffer *collector.RingBuffer, storageMgr *stora
 	}
 }
 
-func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, queryServer *query.Server, simWorker *simulation.Worker, log logr.Logger) {
+func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *storage.Manager, saasSender *aggregator.SaaSSender, queryServer *query.Server, simWorker *simulation.Worker, validationAgent *validation.Agent, log logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -636,6 +710,42 @@ func startMetricsServer(port int, buffer *collector.RingBuffer, storageMgr *stor
 				fmt.Fprintf(w, "policyhub_collector_simulation_worker_running 1\n")
 			} else {
 				fmt.Fprintf(w, "policyhub_collector_simulation_worker_running 0\n")
+			}
+		}
+
+		// Validation agent metrics
+		if validationAgent != nil {
+			valStats := validationAgent.GetStats()
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_processed_total Total flows validated\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_processed_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_processed_total %d\n", valStats.TotalProcessed)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_allowed_total Total flows allowed by policy\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_allowed_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_allowed_total %d\n", valStats.TotalAllowed)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_blocked_total Total flows blocked by policy\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_blocked_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_blocked_total %d\n", valStats.TotalBlocked)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_no_policy_total Total flows without policy coverage\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_no_policy_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_no_policy_total %d\n", valStats.TotalNoPolicy)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_reports_sent_total Total validation reports sent to SaaS\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_reports_sent_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_reports_sent_total %d\n", valStats.ReportsSent)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_reports_failed_total Total validation reports failed\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_reports_failed_total counter\n")
+			fmt.Fprintf(w, "policyhub_collector_validation_reports_failed_total %d\n", valStats.ReportsFailed)
+
+			fmt.Fprintf(w, "# HELP policyhub_collector_validation_running Validation agent running (1=yes, 0=no)\n")
+			fmt.Fprintf(w, "# TYPE policyhub_collector_validation_running gauge\n")
+			if valStats.Running {
+				fmt.Fprintf(w, "policyhub_collector_validation_running 1\n")
+			} else {
+				fmt.Fprintf(w, "policyhub_collector_validation_running 0\n")
 			}
 		}
 	})

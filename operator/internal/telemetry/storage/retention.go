@@ -99,7 +99,15 @@ func (rw *RetentionWorker) Start(ctx context.Context) {
 func (rw *RetentionWorker) RunCleanup(ctx context.Context) error {
 	rw.log.V(1).Info("Running cleanup cycle")
 
-	// 1. Delete data older than retention period
+	// Log current storage status before cleanup
+	if rw.index != nil {
+		dbSize, _ := rw.index.GetDatabaseSize()
+		rw.log.Info("Pre-cleanup storage status",
+			"sqliteDBSizeGB", float64(dbSize)/(1024*1024*1024),
+		)
+	}
+
+	// 1. Delete data older than retention period (includes SQLite event cleanup)
 	if err := rw.cleanupOldData(ctx); err != nil {
 		rw.log.Error(err, "Failed to cleanup old data")
 	}
@@ -114,12 +122,66 @@ func (rw *RetentionWorker) RunCleanup(ctx context.Context) error {
 		rw.log.Error(err, "Failed to cleanup empty directories")
 	}
 
-	// 4. Vacuum SQLite database periodically
+	// 4. Vacuum SQLite database only if we have enough free space
+	// VACUUM requires temporary disk space approximately equal to the database size
 	if rw.index != nil {
-		if err := rw.index.Vacuum(); err != nil {
+		if err := rw.safeVacuum(ctx); err != nil {
 			rw.log.Error(err, "Failed to vacuum index")
 		}
 	}
+
+	return nil
+}
+
+// safeVacuum runs VACUUM only when there's sufficient free disk space.
+// VACUUM creates a temporary copy of the database, so it needs roughly 2x the DB size.
+func (rw *RetentionWorker) safeVacuum(ctx context.Context) error {
+	if rw.index == nil {
+		return nil
+	}
+
+	// Get current database size
+	dbSize, err := rw.index.GetDatabaseSize()
+	if err != nil {
+		return fmt.Errorf("failed to get database size: %w", err)
+	}
+
+	// Get current total storage usage
+	totalSize, err := rw.getStorageSize()
+	if err != nil {
+		return fmt.Errorf("failed to get storage size: %w", err)
+	}
+
+	maxBytes := rw.maxStorageGB * 1024 * 1024 * 1024
+	freeSpace := maxBytes - totalSize
+
+	// Only vacuum if we have at least 2x the database size in free space
+	// This ensures we don't run out of disk during the vacuum operation
+	requiredSpace := dbSize * 2
+	if freeSpace < requiredSpace {
+		rw.log.Info("Skipping vacuum - insufficient free space",
+			"dbSizeGB", float64(dbSize)/(1024*1024*1024),
+			"freeSpaceGB", float64(freeSpace)/(1024*1024*1024),
+			"requiredSpaceGB", float64(requiredSpace)/(1024*1024*1024),
+		)
+		return nil
+	}
+
+	// Run vacuum
+	rw.log.Info("Running SQLite vacuum",
+		"dbSizeGB", float64(dbSize)/(1024*1024*1024),
+	)
+	if err := rw.index.Vacuum(); err != nil {
+		return fmt.Errorf("vacuum failed: %w", err)
+	}
+
+	// Log size after vacuum
+	newSize, _ := rw.index.GetDatabaseSize()
+	rw.log.Info("SQLite vacuum completed",
+		"oldSizeGB", float64(dbSize)/(1024*1024*1024),
+		"newSizeGB", float64(newSize)/(1024*1024*1024),
+		"reclaimedGB", float64(dbSize-newSize)/(1024*1024*1024),
+	)
 
 	return nil
 }
@@ -128,6 +190,11 @@ func (rw *RetentionWorker) RunCleanup(ctx context.Context) error {
 func (rw *RetentionWorker) cleanupOldData(ctx context.Context) error {
 	cutoffDate := time.Now().UTC().AddDate(0, 0, -rw.retentionDays).Format("2006-01-02")
 	rw.log.V(1).Info("Cleaning up data before cutoff", "cutoffDate", cutoffDate)
+
+	// Clean up SQLite events first (this is critical - the DB can grow very large!)
+	if err := rw.cleanupSQLiteEvents(ctx); err != nil {
+		rw.log.Error(err, "Failed to cleanup SQLite events")
+	}
 
 	// Get old files from index
 	if rw.index != nil {
@@ -151,6 +218,52 @@ func (rw *RetentionWorker) cleanupOldData(ctx context.Context) error {
 
 	// Also scan filesystem for any orphaned files
 	return rw.scanAndDeleteOldDirs(ctx, cutoffDate)
+}
+
+// cleanupSQLiteEvents deletes old events and hourly stats from the SQLite index.
+func (rw *RetentionWorker) cleanupSQLiteEvents(ctx context.Context) error {
+	if rw.index == nil {
+		return nil
+	}
+
+	cutoffTime := time.Now().UTC().AddDate(0, 0, -rw.retentionDays)
+	cutoffTimestamp := cutoffTime.Unix()
+	cutoffHour := cutoffTime.Format("2006-01-02T15")
+
+	// Delete old events from event_index table
+	eventsDeleted, err := rw.index.DeleteEventsOlderThan(ctx, cutoffTimestamp)
+	if err != nil {
+		return fmt.Errorf("failed to delete old events: %w", err)
+	}
+	if eventsDeleted > 0 {
+		rw.log.Info("Deleted old events from SQLite index",
+			"deletedCount", eventsDeleted,
+			"cutoffTime", cutoffTime.Format(time.RFC3339),
+		)
+	}
+
+	// Delete old hourly stats
+	statsDeleted, err := rw.index.DeleteHourlyStatsOlderThan(ctx, cutoffHour)
+	if err != nil {
+		return fmt.Errorf("failed to delete old hourly stats: %w", err)
+	}
+	if statsDeleted > 0 {
+		rw.log.Info("Deleted old hourly stats from SQLite index",
+			"deletedCount", statsDeleted,
+			"cutoffHour", cutoffHour,
+		)
+	}
+
+	// Checkpoint to reduce WAL file size after deletions
+	if eventsDeleted > 0 || statsDeleted > 0 {
+		if err := rw.index.Checkpoint(); err != nil {
+			rw.log.Error(err, "Failed to checkpoint SQLite database")
+		} else {
+			rw.log.V(1).Info("Checkpointed SQLite database after cleanup")
+		}
+	}
+
+	return nil
 }
 
 // scanAndDeleteOldDirs scans the filesystem for old date directories.
@@ -313,10 +426,11 @@ func (rw *RetentionWorker) cleanupEmptyDirs(ctx context.Context) error {
 	return nil
 }
 
-// getStorageSize returns the total size of stored data.
+// getStorageSize returns the total size of stored data including SQLite database.
 func (rw *RetentionWorker) getStorageSize() (int64, error) {
 	var totalSize int64
 
+	// Walk parquet files directory
 	err := filepath.Walk(rw.basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
@@ -326,8 +440,19 @@ func (rw *RetentionWorker) getStorageSize() (int64, error) {
 		}
 		return nil
 	})
+	if err != nil {
+		return totalSize, err
+	}
 
-	return totalSize, err
+	// Add SQLite database size (this was the missing piece causing disk pressure!)
+	if rw.index != nil {
+		dbSize, err := rw.index.GetDatabaseSize()
+		if err == nil {
+			totalSize += dbSize
+		}
+	}
+
+	return totalSize, nil
 }
 
 // getSortedDates returns date directories sorted oldest first.
@@ -355,18 +480,35 @@ func (rw *RetentionWorker) getSortedDates() ([]string, error) {
 
 // GetRetentionStats returns statistics about data retention.
 func (rw *RetentionWorker) GetRetentionStats() (*RetentionStats, error) {
+	ctx := context.Background()
 	stats := &RetentionStats{
 		RetentionDays: rw.retentionDays,
 		MaxStorageGB:  rw.maxStorageGB,
 	}
 
-	// Get storage size
+	// Get total storage size (includes SQLite)
 	size, err := rw.getStorageSize()
 	if err != nil {
 		return nil, err
 	}
 	stats.CurrentStorageBytes = size
 	stats.StorageUsagePercent = float64(size) / float64(rw.maxStorageGB*1024*1024*1024) * 100
+
+	// Get SQLite-specific stats
+	if rw.index != nil {
+		sqliteSize, err := rw.index.GetDatabaseSize()
+		if err == nil {
+			stats.SQLiteStorageBytes = sqliteSize
+		}
+
+		eventCount, err := rw.index.GetEventCount(ctx)
+		if err == nil {
+			stats.SQLiteEventCount = eventCount
+		}
+	}
+
+	// Calculate parquet size (total - sqlite)
+	stats.ParquetStorageBytes = stats.CurrentStorageBytes - stats.SQLiteStorageBytes
 
 	// Get date range
 	dates, err := rw.getSortedDates()
@@ -388,14 +530,17 @@ func (rw *RetentionWorker) GetRetentionStats() (*RetentionStats, error) {
 
 // RetentionStats contains retention statistics.
 type RetentionStats struct {
-	RetentionDays       int
-	MaxStorageGB        int64
-	CurrentStorageBytes int64
-	StorageUsagePercent float64
-	OldestDate          string
-	NewestDate          string
-	CutoffDate          string
-	DaysStored          int
+	RetentionDays        int
+	MaxStorageGB         int64
+	CurrentStorageBytes  int64
+	ParquetStorageBytes  int64
+	SQLiteStorageBytes   int64
+	StorageUsagePercent  float64
+	OldestDate           string
+	NewestDate           string
+	CutoffDate           string
+	DaysStored           int
+	SQLiteEventCount     int64
 }
 
 // Helper functions
