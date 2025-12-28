@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -97,6 +98,20 @@ func (m *PolicyMatcher) RefreshPolicies(ctx context.Context) error {
 	m.policiesMu.Unlock()
 
 	m.log.Info("Policies refreshed", "count", len(parsedPolicies))
+
+	// Debug: log parsed policies
+	for _, pc := range parsedPolicies {
+		m.log.Info("DEBUG: Parsed policy",
+			"name", pc.Name,
+			"namespace", pc.Namespace,
+			"policyNamespace", pc.Parsed.Namespace,
+			"podSelector", pc.Parsed.PodSelector,
+			"ingressRules", len(pc.Parsed.IngressRules),
+			"egressRules", len(pc.Parsed.EgressRules),
+			"defaultDenyType", pc.Parsed.DefaultDenyType,
+		)
+	}
+
 	return nil
 }
 
@@ -141,6 +156,20 @@ func (m *PolicyMatcher) Match(event *models.TelemetryEvent) *ValidationResult {
 	m.policiesMu.RLock()
 	policies := m.policies
 	m.policiesMu.RUnlock()
+
+	// Debug: log flows to deathstar
+	if event.DstNamespace == "default" && (containsLabel(event.DstPodLabels, "class", "deathstar") || containsLabel(event.DstPodLabels, "org", "empire")) {
+		m.log.Info("DEBUG: Flow to deathstar detected",
+			"srcNs", event.SrcNamespace,
+			"srcPod", event.SrcPodName,
+			"srcLabels", event.SrcPodLabels,
+			"dstNs", event.DstNamespace,
+			"dstPod", event.DstPodName,
+			"dstLabels", event.DstPodLabels,
+			"dstPort", event.DstPort,
+			"policyCount", len(policies),
+		)
+	}
 
 	// Find policies that apply to this flow
 	var applicablePolicy *ParsedPolicyCache
@@ -326,12 +355,25 @@ func labelsMatch(labels map[string]string, required map[string]string) bool {
 		return false
 	}
 	for key, reqValue := range required {
-		value, ok := getLabelValue(labels, key)
+		// Strip Cilium label prefixes from required keys (any:, k8s:, etc.)
+		cleanKey := stripLabelPrefix(key)
+		value, ok := getLabelValue(labels, cleanKey)
 		if !ok || value != reqValue {
 			return false
 		}
 	}
 	return true
+}
+
+// stripLabelPrefix removes Cilium label prefixes like any:, k8s:, reserved:
+func stripLabelPrefix(key string) string {
+	prefixes := []string{"any:", "k8s:", "reserved:", "container:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(key, prefix) {
+			return strings.TrimPrefix(key, prefix)
+		}
+	}
+	return key
 }
 
 // getLabelValue retrieves a label value, handling k8s: prefix
@@ -343,4 +385,18 @@ func getLabelValue(labels map[string]string, key string) (string, bool) {
 		return value, true
 	}
 	return "", false
+}
+
+// containsLabel checks if labels contain a specific key-value pair
+func containsLabel(labels map[string]string, key, value string) bool {
+	if labels == nil {
+		return false
+	}
+	if v, ok := labels[key]; ok && v == value {
+		return true
+	}
+	if v, ok := labels["k8s:"+key]; ok && v == value {
+		return true
+	}
+	return false
 }
