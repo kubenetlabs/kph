@@ -81,6 +81,22 @@ spec:
                 clusterId:
                   description: ClusterID is the unique identifier for this cluster (legacy mode - leave empty for bootstrap)
                   type: string
+                clusterIdSecretRef:
+                  description: ClusterIDSecretRef references the secret containing the cluster ID (alternative to clusterId)
+                  properties:
+                    key:
+                      description: Key in the secret to select
+                      type: string
+                    name:
+                      description: Name of the secret
+                      type: string
+                    namespace:
+                      description: Namespace of the secret (defaults to the PolicyHubConfig namespace)
+                      type: string
+                  required:
+                    - key
+                    - name
+                  type: object
                 clusterName:
                   description: ClusterName is the name for this cluster (bootstrap mode)
                   type: string

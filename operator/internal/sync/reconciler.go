@@ -67,8 +67,19 @@ func (r *Reconciler) Initialize(ctx context.Context, config *policyv1alpha1.Poli
 		return r.initializeFromBootstrappedState(ctx, config)
 	}
 
+	// Resolve cluster ID - either from spec directly or from secret reference
+	clusterID := config.Spec.ClusterID
+	if clusterID == "" && config.Spec.ClusterIDSecretRef != nil {
+		var err error
+		clusterID, err = r.getSecretValue(ctx, config.Namespace, config.Spec.ClusterIDSecretRef)
+		if err != nil {
+			return fmt.Errorf("failed to get cluster ID from secret: %w", err)
+		}
+		r.log.Info("Resolved cluster ID from secret", "clusterId", clusterID)
+	}
+
 	// Check if we need to bootstrap (no clusterId but has clusterName and registrationToken)
-	if config.Spec.ClusterID == "" && config.Spec.ClusterName != "" && config.Spec.RegistrationTokenSecretRef != nil {
+	if clusterID == "" && config.Spec.ClusterName != "" && config.Spec.RegistrationTokenSecretRef != nil {
 		return r.bootstrap(ctx, config)
 	}
 
@@ -87,7 +98,7 @@ func (r *Reconciler) Initialize(ctx context.Context, config *policyv1alpha1.Poli
 	r.saasClient = saas.NewClient(
 		config.Spec.SaaSEndpoint,
 		apiToken,
-		config.Spec.ClusterID,
+		clusterID,
 		r.log,
 	)
 
@@ -601,6 +612,30 @@ func (r *Reconciler) getAPIToken(ctx context.Context, config *policyv1alpha1.Pol
 	}
 
 	return string(token), nil
+}
+
+// getSecretValue retrieves a value from a secret reference
+func (r *Reconciler) getSecretValue(ctx context.Context, defaultNamespace string, ref *policyv1alpha1.SecretKeySelector) (string, error) {
+	secretNamespace := ref.Namespace
+	if secretNamespace == "" {
+		secretNamespace = defaultNamespace
+	}
+
+	secret := &corev1.Secret{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      ref.Name,
+		Namespace: secretNamespace,
+	}, secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to get secret %s/%s: %w", secretNamespace, ref.Name, err)
+	}
+
+	value, ok := secret.Data[ref.Key]
+	if !ok {
+		return "", fmt.Errorf("key %s not found in secret %s/%s", ref.Key, secretNamespace, ref.Name)
+	}
+
+	return string(value), nil
 }
 
 // getClusterInfo retrieves basic cluster information

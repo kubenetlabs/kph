@@ -18,6 +18,11 @@ type PolicyHubConfigSpec struct {
 	// +optional
 	ClusterID string `json:"clusterId,omitempty"`
 
+	// ClusterIDSecretRef references the secret containing the cluster ID
+	// Alternative to specifying ClusterID directly - useful when cluster ID is in a shared secret
+	// +optional
+	ClusterIDSecretRef *SecretKeySelector `json:"clusterIdSecretRef,omitempty"`
+
 	// ClusterName is the name for this cluster when using bootstrap mode
 	// The operator will register with the SaaS and create the cluster automatically
 	// +optional

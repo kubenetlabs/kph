@@ -1,0 +1,419 @@
+# =============================================================================
+# Policy Hub - Full Deployment
+# =============================================================================
+# This manifest deploys both the operator and collector components along with
+# the PolicyHubConfig CR for policy syncing.
+#
+# Prerequisites:
+# 1. Register your cluster in the Policy Hub SaaS UI
+# 2. Get your cluster ID and API token
+# 3. Update the secrets section below with your values
+#
+# Usage:
+#   kubectl apply -f full-deployment.yaml
+# =============================================================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub
+    app.kubernetes.io/part-of: policy-hub
+
+---
+# =============================================================================
+# SECRETS - Update these with your cluster credentials
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: policy-hub-credentials
+  namespace: policy-hub-system
+type: Opaque
+stringData:
+  # Get these values from the Policy Hub SaaS UI after registering your cluster
+  cluster-id: "YOUR_CLUSTER_ID"           # e.g., cmjq63as202voqol2ncl6518i
+  saas-endpoint: "https://policy-hub-starter.vercel.app"
+  saas-api-key: "YOUR_API_TOKEN"          # e.g., phub_xxxxxxxxxxxxx
+
+---
+# =============================================================================
+# RBAC - Operator
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-hub-operator
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-operator
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: policy-hub-operator-role
+rules:
+  # PolicyHubConfig permissions
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs/finalizers"]
+    verbs: ["update"]
+  # ManagedPolicy permissions
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies/finalizers"]
+    verbs: ["update"]
+  # Core resources
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Cilium Network Policies
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Standard Network Policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: policy-hub-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: policy-hub-operator-role
+subjects:
+  - kind: ServiceAccount
+    name: policy-hub-operator
+    namespace: policy-hub-system
+
+---
+# =============================================================================
+# RBAC - Collector
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-collector
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: policy-hub-collector-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: policy-hub-collector-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: policy-hub-collector-role
+subjects:
+  - kind: ServiceAccount
+    name: policy-hub-collector
+    namespace: policy-hub-system
+
+---
+# =============================================================================
+# ConfigMap - Collector Configuration
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: policy-hub-collector-config
+  namespace: policy-hub-system
+data:
+  HUBBLE_ADDRESS: "hubble-relay.kube-system.svc.cluster.local:80"
+  HUBBLE_ENABLED: "true"
+  TETRAGON_ADDRESS: "unix:///var/run/tetragon/tetragon.sock"
+  TETRAGON_ENABLED: "false"
+  STORAGE_PATH: "/var/lib/policyhub/telemetry"
+  RETENTION_DAYS: "7"
+  MAX_STORAGE_GB: "10"
+  BUFFER_SIZE: "10000"
+  FLUSH_INTERVAL: "30s"
+  SAAS_ENABLED: "true"
+  AGGREGATION_WINDOW: "1m"
+  SIMULATION_ENABLED: "true"
+  SIMULATION_POLL_INTERVAL: "30s"
+  VALIDATION_ENABLED: "true"
+  VALIDATION_FLUSH_INTERVAL: "60s"
+  VALIDATION_SAMPLE_RATE: "10"
+  LOG_LEVEL: "info"
+
+---
+# =============================================================================
+# Operator Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-hub-operator
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-operator
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-hub-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-hub-operator
+    spec:
+      serviceAccountName: policy-hub-operator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: ghcr.io/henleda/policy-hub-operator:latest
+          imagePullPolicy: Always
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+          env:
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: cluster-id
+            - name: SAAS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: saas-endpoint
+            - name: SAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: saas-api-key
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      terminationGracePeriodSeconds: 10
+
+---
+# =============================================================================
+# Collector DaemonSet
+# =============================================================================
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: policy-hub-collector
+  namespace: policy-hub-system
+  labels:
+    app.kubernetes.io/name: policy-hub-collector
+    app.kubernetes.io/component: telemetry
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-hub-collector
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-hub-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: policy-hub-collector
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 65534:65534 /var/lib/policyhub/telemetry && chmod -R 755 /var/lib/policyhub/telemetry"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: telemetry-storage
+              mountPath: /var/lib/policyhub/telemetry
+      containers:
+        - name: collector
+          image: ghcr.io/henleda/policy-hub-operator:latest
+          command: ["/collector"]
+          imagePullPolicy: Always
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: cluster-id
+            - name: SAAS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: saas-endpoint
+            - name: SAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: saas-api-key
+          envFrom:
+            - configMapRef:
+                name: policy-hub-collector-config
+          ports:
+            - name: health
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: telemetry-storage
+              mountPath: /var/lib/policyhub/telemetry
+            - name: tetragon-sock
+              mountPath: /var/run/tetragon
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: telemetry-storage
+          hostPath:
+            path: /var/lib/policyhub/telemetry
+            type: DirectoryOrCreate
+        - name: tetragon-sock
+          hostPath:
+            path: /var/run/tetragon
+            type: DirectoryOrCreate
+        - name: tmp
+          emptyDir: {}
+
+---
+# =============================================================================
+# PolicyHubConfig - Enables policy syncing from SaaS
+# =============================================================================
+# This CR tells the operator to connect to the SaaS and sync policies.
+# Both clusterIdSecretRef and apiTokenSecretRef read from the same secret.
+apiVersion: policyhub.io/v1alpha1
+kind: PolicyHubConfig
+metadata:
+  name: policy-hub-config
+  namespace: policy-hub-system
+spec:
+  # SaaS connection - all values read from the credentials secret
+  saasEndpoint: https://policy-hub-starter.vercel.app
+
+  # Cluster ID from secret (no need to duplicate)
+  clusterIdSecretRef:
+    name: policy-hub-credentials
+    key: cluster-id
+
+  # API token from secret
+  apiTokenSecretRef:
+    name: policy-hub-credentials
+    key: saas-api-key
+
+  # Sync settings
+  syncInterval: 30s
+  heartbeatInterval: 60s
