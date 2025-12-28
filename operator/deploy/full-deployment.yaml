@@ -4,13 +4,26 @@
 # This manifest deploys both the operator and collector components along with
 # the PolicyHubConfig CR for policy syncing.
 #
-# Prerequisites:
-# 1. Register your cluster in the Policy Hub SaaS UI
-# 2. Get your cluster ID and API token
-# 3. Update the secrets section below with your values
+# BOOTSTRAP MODE (Recommended for new clusters):
+# 1. Create a Registration Token in SaaS UI: Clusters → Registration Tokens → Create
+# 2. Update the secret below with your registration token
+# 3. Update the clusterName in PolicyHubConfig spec (at the bottom)
+# 4. kubectl apply -f full-deployment.yaml
+# 5. The operator will:
+#    - Self-register with the SaaS platform
+#    - Create the cluster in the SaaS automatically
+#    - Create a 'policy-hub-cluster-token' secret with the cluster credentials
+# 6. The collector will wait for bootstrap to complete, then start collecting telemetry
+# 7. The cluster appears in the SaaS UI ready for policy management
 #
-# Usage:
-#   kubectl apply -f full-deployment.yaml
+# LEGACY MODE (If you already have a cluster ID):
+# 1. Create the cluster manually in SaaS UI
+# 2. Create a secret named 'policy-hub-cluster-token' with keys:
+#    - cluster-id: Your cluster ID from SaaS
+#    - api-token: Your cluster API token from SaaS
+# 3. Comment out the bootstrap PolicyHubConfig and uncomment the legacy one (at bottom)
+# 4. kubectl apply -f full-deployment.yaml
+#
 # =============================================================================
 
 ---
@@ -25,8 +38,10 @@ metadata:
 
 ---
 # =============================================================================
-# SECRETS - Update these with your cluster credentials
+# SECRETS - Update with your credentials
 # =============================================================================
+# For BOOTSTRAP MODE: Only registration-token and saas-endpoint are required
+# For LEGACY MODE: Create policy-hub-cluster-token secret with cluster-id and api-token
 apiVersion: v1
 kind: Secret
 metadata:
@@ -34,10 +49,25 @@ metadata:
   namespace: policy-hub-system
 type: Opaque
 stringData:
-  # Get these values from the Policy Hub SaaS UI after registering your cluster
-  cluster-id: "YOUR_CLUSTER_ID"           # e.g., cmjq63as202voqol2ncl6518i
+  # === BOOTSTRAP MODE (Recommended) ===
+  # Get this from SaaS UI: Clusters → Registration Tokens → Create Token
+  registration-token: "YOUR_REGISTRATION_TOKEN"  # e.g., phub_xxxxxxxxxxxxx
+
+  # SaaS endpoint (required for both modes)
   saas-endpoint: "https://policy-hub-starter.vercel.app"
-  saas-api-key: "YOUR_API_TOKEN"          # e.g., phub_xxxxxxxxxxxxx
+
+# === LEGACY MODE ONLY ===
+# If using legacy mode, uncomment and create this secret instead of using bootstrap:
+# ---
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: policy-hub-cluster-token
+#   namespace: policy-hub-system
+# type: Opaque
+# stringData:
+#   cluster-id: "YOUR_CLUSTER_ID"    # e.g., cmjq63as202voqol2ncl6518i
+#   api-token: "YOUR_API_TOKEN"      # e.g., phub_xxxxxxxxxxxxx
 
 ---
 # =============================================================================
@@ -135,6 +165,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "namespaces", "nodes"]
     verbs: ["get", "list", "watch"]
+  # Secrets access needed for wait-for-bootstrap init container
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch"]
@@ -220,21 +254,26 @@ spec:
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8080
           env:
-            - name: CLUSTER_ID
-              valueFrom:
-                secretKeyRef:
-                  name: policy-hub-credentials
-                  key: cluster-id
+            # SAAS_ENDPOINT is always required
             - name: SAAS_ENDPOINT
               valueFrom:
                 secretKeyRef:
                   name: policy-hub-credentials
                   key: saas-endpoint
+            # In BOOTSTRAP MODE: These are optional - operator will bootstrap and create policy-hub-cluster-token
+            # In LEGACY MODE: These are required from policy-hub-credentials secret
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: policy-hub-credentials
+                  key: cluster-id
+                  optional: true
             - name: SAAS_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: policy-hub-credentials
                   key: saas-api-key
+                  optional: true
           ports:
             - name: metrics
               containerPort: 8080
@@ -309,6 +348,20 @@ spec:
           volumeMounts:
             - name: telemetry-storage
               mountPath: /var/lib/policyhub/telemetry
+        # Wait for bootstrap to complete (creates policy-hub-cluster-token secret)
+        # In legacy mode, this secret should be created manually with cluster-id and api-token keys
+        - name: wait-for-bootstrap
+          image: bitnami/kubectl:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for policy-hub-cluster-token secret..."
+              until kubectl get secret policy-hub-cluster-token -n policy-hub-system 2>/dev/null; do
+                echo "Secret not found, waiting 5s..."
+                sleep 5
+              done
+              echo "Bootstrap secret found, collector can start"
       containers:
         - name: collector
           image: ghcr.io/henleda/policy-hub-operator:latest
@@ -319,10 +372,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # In BOOTSTRAP MODE: Read from secret created by operator after bootstrap
+            # In LEGACY MODE: Create policy-hub-cluster-token secret manually with cluster-id and api-token
             - name: CLUSTER_ID
               valueFrom:
                 secretKeyRef:
-                  name: policy-hub-credentials
+                  name: policy-hub-cluster-token
                   key: cluster-id
             - name: SAAS_ENDPOINT
               valueFrom:
@@ -332,8 +387,8 @@ spec:
             - name: SAAS_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: policy-hub-credentials
-                  key: saas-api-key
+                  name: policy-hub-cluster-token
+                  key: api-token
           envFrom:
             - configMapRef:
                 name: policy-hub-collector-config
@@ -393,27 +448,59 @@ spec:
 # =============================================================================
 # PolicyHubConfig - Enables policy syncing from SaaS
 # =============================================================================
-# This CR tells the operator to connect to the SaaS and sync policies.
-# Both clusterIdSecretRef and apiTokenSecretRef read from the same secret.
+# Choose ONE of the two modes below (comment out the other)
+
+# === BOOTSTRAP MODE (Recommended) ===
+# The operator will self-register with the SaaS using the registration token.
+# After bootstrap, the cluster appears in the SaaS UI automatically.
 apiVersion: policyhub.io/v1alpha1
 kind: PolicyHubConfig
 metadata:
   name: policy-hub-config
   namespace: policy-hub-system
 spec:
-  # SaaS connection - all values read from the credentials secret
   saasEndpoint: https://policy-hub-starter.vercel.app
 
-  # Cluster ID from secret (no need to duplicate)
-  clusterIdSecretRef:
-    name: policy-hub-credentials
-    key: cluster-id
+  # Cluster name (will appear in SaaS UI)
+  clusterName: my-cluster  # Change this to your cluster name
 
-  # API token from secret
-  apiTokenSecretRef:
+  # Registration token from secret
+  registrationTokenSecretRef:
     name: policy-hub-credentials
-    key: saas-api-key
+    key: registration-token
+
+  # Optional: Cluster metadata
+  provider: OTHER      # AWS, GCP, AZURE, ON_PREM, OTHER
+  region: local
+  environment: DEVELOPMENT  # DEVELOPMENT, STAGING, PRODUCTION, TESTING
 
   # Sync settings
   syncInterval: 30s
   heartbeatInterval: 60s
+
+# === LEGACY MODE ===
+# Use this if you already have a cluster ID and API token
+# 1. First create the policy-hub-cluster-token secret with cluster-id and api-token keys
+# 2. Then uncomment below and comment out the bootstrap mode above
+#
+# ---
+# apiVersion: policyhub.io/v1alpha1
+# kind: PolicyHubConfig
+# metadata:
+#   name: policy-hub-config
+#   namespace: policy-hub-system
+# spec:
+#   saasEndpoint: https://policy-hub-starter.vercel.app
+#
+#   # Cluster ID from secret (must match what collector reads)
+#   clusterIdSecretRef:
+#     name: policy-hub-cluster-token
+#     key: cluster-id
+#
+#   # API token from secret (must match what collector reads)
+#   apiTokenSecretRef:
+#     name: policy-hub-cluster-token
+#     key: api-token
+#
+#   syncInterval: 30s
+#   heartbeatInterval: 60s

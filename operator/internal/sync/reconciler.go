@@ -201,14 +201,16 @@ func (r *Reconciler) bootstrap(ctx context.Context, config *policyv1alpha1.Polic
 		"clusterName", resp.Cluster.Name,
 		"operatorId", resp.Cluster.OperatorID)
 
-	// Store the cluster token in a secret
+	// Store the cluster token and cluster ID in a secret
+	// This secret is used by both the operator (after restart) and collector
 	clusterTokenSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "policy-hub-cluster-token",
 			Namespace: config.Namespace,
 		},
 		StringData: map[string]string{
-			"api-token": resp.ClusterToken,
+			"api-token":  resp.ClusterToken,
+			"cluster-id": resp.Cluster.ID,
 		},
 	}
 
