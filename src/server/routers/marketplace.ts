@@ -480,4 +480,383 @@ export const marketplaceRouter = createTRPCRouter({
       currentPeriodEnd: subscription?.currentPeriodEnd,
     };
   }),
+
+  // =====================
+  // Admin Endpoints
+  // =====================
+
+  // Get packs created by this organization
+  getMyPacks: protectedProcedure.query(async ({ ctx }) => {
+    const packs = await ctx.db.policyPack.findMany({
+      where: { createdByOrgId: ctx.organizationId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        policies: {
+          orderBy: { order: "asc" },
+        },
+        _count: {
+          select: { installations: true },
+        },
+      },
+    });
+
+    return {
+      packs: packs.map((pack) => ({
+        id: pack.id,
+        slug: pack.slug,
+        name: pack.name,
+        description: pack.description,
+        tier: pack.tier,
+        category: pack.category,
+        version: pack.version,
+        isPublished: pack.isPublished,
+        policies: pack.policies,
+        installCount: pack._count.installations,
+        createdAt: pack.createdAt,
+        updatedAt: pack.updatedAt,
+      })),
+    };
+  }),
+
+  // Create a new policy pack
+  createPack: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().min(1).max(100),
+        slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
+        description: z.string().min(1).max(500),
+        tier: PolicyPackTierSchema,
+        category: PolicyPackCategorySchema,
+        version: z.string().default("1.0.0"),
+        complianceFramework: z.string().optional(),
+        iconUrl: z.string().url().optional(),
+        docsUrl: z.string().url().optional(),
+        tags: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Check if slug is already taken
+      const existing = await ctx.db.policyPack.findUnique({
+        where: { slug: input.slug },
+      });
+
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "A pack with this slug already exists",
+        });
+      }
+
+      const pack = await ctx.db.policyPack.create({
+        data: {
+          slug: input.slug,
+          name: input.name,
+          description: input.description,
+          tier: input.tier,
+          category: input.category,
+          version: input.version,
+          complianceFramework: input.complianceFramework,
+          iconUrl: input.iconUrl,
+          docsUrl: input.docsUrl,
+          tags: input.tags,
+          isPublished: false,
+          createdByOrgId: ctx.organizationId,
+        },
+      });
+
+      return { pack };
+    }),
+
+  // Update a policy pack
+  updatePack: protectedProcedure
+    .input(
+      z.object({
+        packId: z.string(),
+        name: z.string().min(1).max(100).optional(),
+        description: z.string().min(1).max(500).optional(),
+        tier: PolicyPackTierSchema.optional(),
+        category: PolicyPackCategorySchema.optional(),
+        version: z.string().optional(),
+        complianceFramework: z.string().nullable().optional(),
+        iconUrl: z.string().url().nullable().optional(),
+        docsUrl: z.string().url().nullable().optional(),
+        tags: z.array(z.string()).optional(),
+        isPublished: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify pack belongs to organization
+      const pack = await ctx.db.policyPack.findFirst({
+        where: {
+          id: input.packId,
+          createdByOrgId: ctx.organizationId,
+        },
+      });
+
+      if (!pack) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy pack not found",
+        });
+      }
+
+      const { packId, ...updateData } = input;
+
+      const updated = await ctx.db.policyPack.update({
+        where: { id: packId },
+        data: updateData,
+      });
+
+      return { pack: updated };
+    }),
+
+  // Delete a policy pack
+  deletePack: protectedProcedure
+    .input(z.object({ packId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Verify pack belongs to organization
+      const pack = await ctx.db.policyPack.findFirst({
+        where: {
+          id: input.packId,
+          createdByOrgId: ctx.organizationId,
+        },
+        include: {
+          _count: { select: { installations: true } },
+        },
+      });
+
+      if (!pack) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy pack not found",
+        });
+      }
+
+      if (pack._count.installations > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Cannot delete pack with ${pack._count.installations} active installation(s)`,
+        });
+      }
+
+      // Delete policies first, then pack
+      await ctx.db.policyPackItem.deleteMany({
+        where: { packId: input.packId },
+      });
+
+      await ctx.db.policyPack.delete({
+        where: { id: input.packId },
+      });
+
+      return { success: true };
+    }),
+
+  // Add a new policy to a pack
+  addPolicyToPack: protectedProcedure
+    .input(
+      z.object({
+        packId: z.string(),
+        name: z.string().min(1).max(100),
+        description: z.string().min(1).max(500),
+        policyType: z.enum(["CILIUM_NETWORK", "CILIUM_CLUSTERWIDE"]),
+        yamlContent: z.string().min(1),
+        controlIds: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify pack belongs to organization
+      const pack = await ctx.db.policyPack.findFirst({
+        where: {
+          id: input.packId,
+          createdByOrgId: ctx.organizationId,
+        },
+        include: {
+          policies: { select: { order: true }, orderBy: { order: "desc" }, take: 1 },
+        },
+      });
+
+      if (!pack) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy pack not found",
+        });
+      }
+
+      const nextOrder = (pack.policies[0]?.order ?? -1) + 1;
+
+      const policy = await ctx.db.policyPackItem.create({
+        data: {
+          packId: input.packId,
+          name: input.name,
+          description: input.description,
+          policyType: input.policyType,
+          yamlContent: input.yamlContent,
+          controlIds: input.controlIds,
+          order: nextOrder,
+        },
+      });
+
+      return { policy };
+    }),
+
+  // Update a policy in a pack
+  updatePackPolicy: protectedProcedure
+    .input(
+      z.object({
+        policyId: z.string(),
+        name: z.string().min(1).max(100).optional(),
+        description: z.string().min(1).max(500).optional(),
+        policyType: z.enum(["CILIUM_NETWORK", "CILIUM_CLUSTERWIDE"]).optional(),
+        yamlContent: z.string().min(1).optional(),
+        controlIds: z.array(z.string()).optional(),
+        order: z.number().int().min(0).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify policy's pack belongs to organization
+      const policy = await ctx.db.policyPackItem.findFirst({
+        where: { id: input.policyId },
+        include: {
+          pack: { select: { createdByOrgId: true } },
+        },
+      });
+
+      if (!policy || policy.pack.createdByOrgId !== ctx.organizationId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      const { policyId, ...updateData } = input;
+
+      const updated = await ctx.db.policyPackItem.update({
+        where: { id: policyId },
+        data: updateData,
+      });
+
+      return { policy: updated };
+    }),
+
+  // Remove a policy from a pack
+  removePackPolicy: protectedProcedure
+    .input(z.object({ policyId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Verify policy's pack belongs to organization
+      const policy = await ctx.db.policyPackItem.findFirst({
+        where: { id: input.policyId },
+        include: {
+          pack: { select: { createdByOrgId: true } },
+        },
+      });
+
+      if (!policy || policy.pack.createdByOrgId !== ctx.organizationId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      await ctx.db.policyPackItem.delete({
+        where: { id: input.policyId },
+      });
+
+      return { success: true };
+    }),
+
+  // Import existing organization policy into a pack
+  importPolicyToPack: protectedProcedure
+    .input(
+      z.object({
+        packId: z.string(),
+        policyId: z.string(),
+        controlIds: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify pack belongs to organization
+      const pack = await ctx.db.policyPack.findFirst({
+        where: {
+          id: input.packId,
+          createdByOrgId: ctx.organizationId,
+        },
+        include: {
+          policies: { select: { order: true }, orderBy: { order: "desc" }, take: 1 },
+        },
+      });
+
+      if (!pack) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy pack not found",
+        });
+      }
+
+      // Get the organization policy
+      const orgPolicy = await ctx.db.policy.findFirst({
+        where: {
+          id: input.policyId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!orgPolicy) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      const nextOrder = (pack.policies[0]?.order ?? -1) + 1;
+
+      const policy = await ctx.db.policyPackItem.create({
+        data: {
+          packId: input.packId,
+          name: orgPolicy.name,
+          description: orgPolicy.description ?? "",
+          policyType: orgPolicy.type === "CILIUM_CLUSTERWIDE" ? "CILIUM_CLUSTERWIDE" : "CILIUM_NETWORK",
+          yamlContent: orgPolicy.content,
+          controlIds: input.controlIds,
+          order: nextOrder,
+        },
+      });
+
+      return { policy };
+    }),
+
+  // List organization's policies for import selection
+  listOrgPolicies: protectedProcedure
+    .input(
+      z.object({
+        search: z.string().optional(),
+        limit: z.number().min(1).max(100).default(50),
+      }).optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const policies = await ctx.db.policy.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          ...(input?.search && {
+            OR: [
+              { name: { contains: input.search, mode: "insensitive" as const } },
+              { description: { contains: input.search, mode: "insensitive" as const } },
+            ],
+          }),
+        },
+        take: input?.limit ?? 50,
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          type: true,
+          status: true,
+          cluster: {
+            select: { id: true, name: true },
+          },
+        },
+      });
+
+      return { policies };
+    }),
 });

@@ -70,6 +70,14 @@ function CrownIcon({ className }: { className?: string }) {
   );
 }
 
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+    </svg>
+  );
+}
+
 const categoryOptions = [
   { value: "", label: "All Categories" },
   { value: "COMPLIANCE", label: "Compliance" },
@@ -139,6 +147,12 @@ export default function MarketplacePage() {
                 </Button>
               </Link>
             )}
+            <Link href="/marketplace/admin">
+              <Button variant="secondary">
+                <PlusIcon className="w-4 h-4 mr-2" />
+                Create Pack
+              </Button>
+            </Link>
             <Link href="/marketplace/installed">
               <Button variant="secondary">
                 <PackageIcon className="w-4 h-4 mr-2" />

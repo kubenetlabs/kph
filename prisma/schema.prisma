@@ -28,6 +28,7 @@ model Organization {
   simulations Simulation[]
   apiTokens   ApiToken[]
   packInstallations PolicyPackInstallation[]
+  createdPacks      PolicyPack[] @relation("OrgCreatedPacks")
   subscription Subscription?
 
   @@map("organizations")
@@ -442,9 +443,14 @@ model PolicyPack {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Created by organization (for user-created packs)
+  createdByOrgId String?
+  createdByOrg   Organization? @relation("OrgCreatedPacks", fields: [createdByOrgId], references: [id])
+
   // Usage tracking
   installations PolicyPackInstallation[]
 
+  @@index([createdByOrgId])
   @@map("policy_packs")
 }
 
