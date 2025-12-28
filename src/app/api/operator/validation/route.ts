@@ -100,8 +100,18 @@ export async function POST(request: NextRequest) {
     let eventsCreated = 0;
 
     console.log(`[validation] Received: summaries=${summaries?.length ?? 0}, events=${events?.length ?? 0}`);
-    if (summaries && summaries.length > 0) {
-      console.log(`[validation] First summary: coverageGaps=${summaries[0]?.coverageGaps?.length ?? 0}, topBlocked=${summaries[0]?.topBlocked?.length ?? 0}`);
+    if (summaries && summaries.length > 0 && summaries[0]) {
+      console.log(`[validation] First summary: hour=${summaries[0].hour}, coverageGaps=${summaries[0].coverageGaps?.length ?? 0}, topBlocked=${summaries[0].topBlocked?.length ?? 0}`);
+      if (summaries[0].coverageGaps && summaries[0].coverageGaps.length > 0) {
+        console.log(`[validation] First gap: ${JSON.stringify(summaries[0].coverageGaps[0])}`);
+      }
+    }
+    if (events && events.length > 0) {
+      const verdictCounts = events.reduce((acc, e) => {
+        acc[e.verdict] = (acc[e.verdict] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      console.log(`[validation] Event verdicts: ${JSON.stringify(verdictCounts)}`);
     }
 
     // Upsert validation summaries
@@ -158,7 +168,10 @@ export async function POST(request: NextRequest) {
         skipDuplicates: true,
       });
       eventsCreated = result.count;
+      console.log(`[validation] Created ${eventsCreated} events (attempted ${eventRecords.length})`);
     }
+
+    console.log(`[validation] Done: summariesUpserted=${summariesUpserted}, eventsCreated=${eventsCreated}`);
 
     return NextResponse.json({
       success: true,
