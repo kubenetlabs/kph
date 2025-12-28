@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -110,7 +110,6 @@ function FileCodeIcon({ className }: { className?: string }) {
 
 export default function PackDetailsPage() {
   const params = useParams();
-  const router = useRouter();
   const packId = params.packId as string;
 
   const [installModalOpen, setInstallModalOpen] = useState(false);
@@ -124,14 +123,14 @@ export default function PackDetailsPage() {
   const installMutation = trpc.marketplace.installPack.useMutation({
     onSuccess: () => {
       setInstallModalOpen(false);
-      refetch();
+      void refetch();
     },
   });
 
   const deployMutation = trpc.marketplace.deployToCluster.useMutation({
     onSuccess: () => {
       setDeployModalOpen(false);
-      refetch();
+      void refetch();
     },
   });
 

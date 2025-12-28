@@ -153,7 +153,7 @@ export default function InstalledPacksPage() {
     onSuccess: () => {
       setUninstallModalOpen(false);
       setSelectedInstallation(null);
-      refetch();
+      void refetch();
     },
   });
 

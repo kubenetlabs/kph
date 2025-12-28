@@ -202,7 +202,7 @@ export const marketplaceRouter = createTRPCRouter({
         where: { id: input.packId },
       });
 
-      if (!pack || !pack.isPublished) {
+      if (!pack?.isPublished) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Policy pack not found",

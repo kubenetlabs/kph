@@ -2,14 +2,6 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
-const DeploymentStatusSchema = z.enum([
-  "PENDING",
-  "IN_PROGRESS",
-  "SUCCEEDED",
-  "FAILED",
-  "ROLLED_BACK",
-]);
-
 export const deploymentRouter = createTRPCRouter({
   // List deployments for a policy
   listByPolicy: protectedProcedure

@@ -13,16 +13,6 @@ interface CoverageGap {
   count: number;
 }
 
-interface BlockedFlow {
-  srcNamespace: string;
-  srcPodName?: string;
-  dstNamespace: string;
-  dstPodName?: string;
-  dstPort?: number;
-  policy: string;
-  count: number;
-}
-
 export const validationRouter = createTRPCRouter({
   // Get validation summary for a cluster
   getSummary: protectedProcedure

@@ -49,7 +49,7 @@ export default function SimulationPage() {
   // Build query input based on filters
   const queryInput = {
     ...(filterClusterId && { clusterId: filterClusterId }),
-    ...(filterStatus && { status: filterStatus as SimulationStatus }),
+    ...(filterStatus && { status: filterStatus }),
     ...(filterPolicyId && { policyId: filterPolicyId }),
   };
 

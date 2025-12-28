@@ -223,7 +223,7 @@ export default function MarketplacePage() {
         {/* Pack Grid */}
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[...Array(6)].map((_, i) => (
+            {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="animate-pulse">
                 <CardHeader>
                   <div className="h-6 w-3/4 bg-card-hover rounded" />

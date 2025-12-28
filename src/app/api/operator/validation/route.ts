@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
       const eventRecords = events.map((event) => ({
         clusterId: auth.clusterId,
         timestamp: new Date(event.timestamp),
-        verdict: event.verdict as "ALLOWED" | "BLOCKED" | "NO_POLICY",
+        verdict: event.verdict,
         srcNamespace: event.srcNamespace,
         srcPodName: event.srcPodName,
         srcLabels: event.srcLabels ?? undefined,
