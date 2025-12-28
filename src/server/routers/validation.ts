@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { Prisma } from "@prisma/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
 // Type definitions for JSON fields
@@ -158,7 +157,7 @@ export const validationRouter = createTRPCRouter({
 
       console.log(`[getCoverageGaps] Found ${summaries.length} summaries for cluster ${input.clusterId}`);
       if (summaries.length > 0 && summaries[0]) {
-        console.log(`[getCoverageGaps] First summary hour: ${summaries[0].hour}`);
+        console.log(`[getCoverageGaps] First summary hour: ${summaries[0].hour.toISOString()}`);
         console.log(`[getCoverageGaps] First summary coverageGaps type: ${typeof summaries[0].coverageGaps}`);
         console.log(`[getCoverageGaps] First summary coverageGaps: ${JSON.stringify(summaries[0].coverageGaps)?.slice(0, 500)}`);
       }

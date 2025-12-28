@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
     }
     if (events && events.length > 0) {
       const verdictCounts = events.reduce((acc, e) => {
-        acc[e.verdict] = (acc[e.verdict] || 0) + 1;
+        acc[e.verdict] = (acc[e.verdict] ?? 0) + 1;
         return acc;
       }, {} as Record<string, number>);
       console.log(`[validation] Event verdicts: ${JSON.stringify(verdictCounts)}`);
