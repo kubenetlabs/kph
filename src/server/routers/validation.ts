@@ -155,13 +155,6 @@ export const validationRouter = createTRPCRouter({
         take: 10,
       });
 
-      console.log(`[getCoverageGaps] Found ${summaries.length} summaries for cluster ${input.clusterId}`);
-      if (summaries.length > 0 && summaries[0]) {
-        console.log(`[getCoverageGaps] First summary hour: ${summaries[0].hour.toISOString()}`);
-        console.log(`[getCoverageGaps] First summary coverageGaps type: ${typeof summaries[0].coverageGaps}`);
-        console.log(`[getCoverageGaps] First summary coverageGaps: ${JSON.stringify(summaries[0].coverageGaps)?.slice(0, 500)}`);
-      }
-
       // Aggregate coverage gaps from all summaries
       const gapMap = new Map<string, CoverageGap>();
 
@@ -230,24 +223,6 @@ export const validationRouter = createTRPCRouter({
         orderBy: { timestamp: "desc" },
         take: input.limit,
       });
-
-      // Also count all events for debugging
-      const totalEvents = await ctx.db.validationEvent.count({
-        where: {
-          clusterId: input.clusterId,
-          timestamp: { gte: startTime },
-        },
-      });
-
-      const blockedCount = await ctx.db.validationEvent.count({
-        where: {
-          clusterId: input.clusterId,
-          timestamp: { gte: startTime },
-          verdict: "BLOCKED",
-        },
-      });
-
-      console.log(`[getBlockedFlows] Total events in range: ${totalEvents}, blocked: ${blockedCount}`);
 
       return {
         cluster: { id: cluster.id, name: cluster.name },

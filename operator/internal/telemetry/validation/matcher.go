@@ -99,19 +99,6 @@ func (m *PolicyMatcher) RefreshPolicies(ctx context.Context) error {
 
 	m.log.Info("Policies refreshed", "count", len(parsedPolicies))
 
-	// Debug: log parsed policies
-	for _, pc := range parsedPolicies {
-		m.log.Info("DEBUG: Parsed policy",
-			"name", pc.Name,
-			"namespace", pc.Namespace,
-			"policyNamespace", pc.Parsed.Namespace,
-			"podSelector", pc.Parsed.PodSelector,
-			"ingressRules", len(pc.Parsed.IngressRules),
-			"egressRules", len(pc.Parsed.EgressRules),
-			"defaultDenyType", pc.Parsed.DefaultDenyType,
-		)
-	}
-
 	return nil
 }
 
@@ -157,20 +144,6 @@ func (m *PolicyMatcher) Match(event *models.TelemetryEvent) *ValidationResult {
 	policies := m.policies
 	m.policiesMu.RUnlock()
 
-	// Debug: log flows to deathstar
-	if event.DstNamespace == "default" && (containsLabel(event.DstPodLabels, "class", "deathstar") || containsLabel(event.DstPodLabels, "org", "empire")) {
-		m.log.Info("DEBUG: Flow to deathstar detected",
-			"srcNs", event.SrcNamespace,
-			"srcPod", event.SrcPodName,
-			"srcLabels", event.SrcPodLabels,
-			"dstNs", event.DstNamespace,
-			"dstPod", event.DstPodName,
-			"dstLabels", event.DstPodLabels,
-			"dstPort", event.DstPort,
-			"policyCount", len(policies),
-		)
-	}
-
 	// Find policies that apply to this flow
 	var applicablePolicy *ParsedPolicyCache
 	var matchedRule bool
@@ -180,19 +153,7 @@ func (m *PolicyMatcher) Match(event *models.TelemetryEvent) *ValidationResult {
 
 		// Check if policy applies to destination (for ingress rules)
 		if len(policy.IngressRules) > 0 || policy.DefaultDenyType == "ingress" || policy.DefaultDenyType == "both" {
-			matches := m.matchesEndpointSelector(event.DstNamespace, event.DstPodLabels, policy)
-			// Debug: log for deathstar flows
-			if containsLabel(event.DstPodLabels, "class", "deathstar") {
-				m.log.Info("DEBUG: Endpoint selector check for deathstar",
-					"policyName", pc.Name,
-					"dstNs", event.DstNamespace,
-					"dstLabels", event.DstPodLabels,
-					"policyNs", policy.Namespace,
-					"policySelector", policy.PodSelector,
-					"matches", matches,
-				)
-			}
-			if matches {
+			if m.matchesEndpointSelector(event.DstNamespace, event.DstPodLabels, policy) {
 				applicablePolicy = pc
 				// Check if any ingress rule allows the source
 				for _, rule := range policy.IngressRules {
