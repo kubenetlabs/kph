@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
           name: `Operator token for ${clusterName}`,
           tokenHash,
           prefix,
-          scopes: ["cluster:read", "cluster:write", "policy:read", "policy:write", "flow:write", "telemetry:write", "simulation:read"],
+          scopes: ["cluster:read", "cluster:write", "policy:read", "policy:write", "flow:write", "telemetry:write", "simulation:read", "simulation:write"],
           clusterId: cluster.id,
           organizationId: auth.organizationId,
         },
