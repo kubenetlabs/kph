@@ -180,7 +180,19 @@ func (m *PolicyMatcher) Match(event *models.TelemetryEvent) *ValidationResult {
 
 		// Check if policy applies to destination (for ingress rules)
 		if len(policy.IngressRules) > 0 || policy.DefaultDenyType == "ingress" || policy.DefaultDenyType == "both" {
-			if m.matchesEndpointSelector(event.DstNamespace, event.DstPodLabels, policy) {
+			matches := m.matchesEndpointSelector(event.DstNamespace, event.DstPodLabels, policy)
+			// Debug: log for deathstar flows
+			if containsLabel(event.DstPodLabels, "class", "deathstar") {
+				m.log.Info("DEBUG: Endpoint selector check for deathstar",
+					"policyName", pc.Name,
+					"dstNs", event.DstNamespace,
+					"dstLabels", event.DstPodLabels,
+					"policyNs", policy.Namespace,
+					"policySelector", policy.PodSelector,
+					"matches", matches,
+				)
+			}
+			if matches {
 				applicablePolicy = pc
 				// Check if any ingress rule allows the source
 				for _, rule := range policy.IngressRules {
