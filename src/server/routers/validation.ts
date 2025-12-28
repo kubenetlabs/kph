@@ -151,11 +151,13 @@ export const validationRouter = createTRPCRouter({
         where: {
           clusterId: input.clusterId,
           hour: { gte: startTime },
-          NOT: { coverageGaps: { equals: Prisma.JsonNull } },
+          coverageGaps: { not: Prisma.JsonNull },
         },
         orderBy: { hour: "desc" },
         take: 10,
       });
+
+      console.log(`[getCoverageGaps] Found ${summaries.length} summaries for cluster ${input.clusterId}`);
 
       // Aggregate coverage gaps from all summaries
       const gapMap = new Map<string, CoverageGap>();

@@ -215,6 +215,8 @@ func (r *Reporter) Flush(ctx context.Context) error {
 		"blocked", summary.BlockedCount,
 		"noPolicy", summary.NoPolicyCount,
 		"events", len(events),
+		"coverageGaps", len(summary.CoverageGaps),
+		"topBlocked", len(summary.TopBlocked),
 	)
 
 	return nil

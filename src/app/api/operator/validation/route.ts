@@ -99,6 +99,11 @@ export async function POST(request: NextRequest) {
     let summariesUpserted = 0;
     let eventsCreated = 0;
 
+    console.log(`[validation] Received: summaries=${summaries?.length ?? 0}, events=${events?.length ?? 0}`);
+    if (summaries && summaries.length > 0) {
+      console.log(`[validation] First summary: coverageGaps=${summaries[0]?.coverageGaps?.length ?? 0}, topBlocked=${summaries[0]?.topBlocked?.length ?? 0}`);
+    }
+
     // Upsert validation summaries
     if (summaries && summaries.length > 0) {
       for (const summary of summaries) {
