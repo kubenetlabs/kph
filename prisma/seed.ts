@@ -1182,7 +1182,7 @@ spec:
           description: policy.description,
           policyType: policy.policyType,
           yamlContent: policy.yamlContent,
-          controlIds: policy.controlIds ?? [],
+          controlIds: (policy as { controlIds?: string[] }).controlIds ?? [],
           order: policy.order,
         },
       });
