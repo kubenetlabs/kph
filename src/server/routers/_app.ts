@@ -2,6 +2,9 @@ import { createTRPCRouter } from "../trpc";
 import { policyRouter } from "./policy";
 import { clusterRouter } from "./cluster";
 import { simulationRouter } from "./simulation";
+import { deploymentRouter } from "./deployment";
+import { validationRouter } from "./validation";
+import { marketplaceRouter } from "./marketplace";
 
 /**
  * Root router for the application
@@ -11,6 +14,9 @@ export const appRouter = createTRPCRouter({
   policy: policyRouter,
   cluster: clusterRouter,
   simulation: simulationRouter,
+  deployment: deploymentRouter,
+  validation: validationRouter,
+  marketplace: marketplaceRouter,
 });
 
 // Export type for client usage

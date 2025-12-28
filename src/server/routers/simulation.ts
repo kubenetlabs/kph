@@ -298,4 +298,156 @@ export const simulationRouter = createTRPCRouter({
       flowsChanged: flowsAggregate._sum.flowsChanged ?? 0,
     };
   }),
+
+  // Export simulation results as JSON
+  exportResults: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        format: z.enum(["json", "csv"]).default("json"),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const simulation = await ctx.db.simulation.findFirst({
+        where: {
+          id: input.id,
+          organizationId: ctx.organizationId,
+        },
+        include: {
+          policy: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              content: true,
+            },
+          },
+          cluster: {
+            select: {
+              id: true,
+              name: true,
+              provider: true,
+              region: true,
+            },
+          },
+          runner: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      if (!simulation) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Simulation not found",
+        });
+      }
+
+      // Type-safe results parsing
+      interface SimulatedFlow {
+        srcNamespace: string;
+        srcPodName?: string;
+        dstNamespace: string;
+        dstPodName?: string;
+        dstPort: number;
+        protocol: string;
+        originalVerdict: string;
+        simulatedVerdict: string;
+        verdictChanged: boolean;
+        matchedRule?: string;
+        matchReason?: string;
+      }
+
+      interface SimulationResults {
+        noChangeCount?: number;
+        breakdownByNamespace?: Record<string, unknown>;
+        breakdownByVerdict?: Record<string, number>;
+        sampleFlows?: SimulatedFlow[];
+        errors?: string[];
+        durationNs?: number;
+      }
+
+      const results = simulation.results as SimulationResults | null;
+
+      if (input.format === "csv") {
+        // Generate CSV for sample flows
+        const sampleFlows = results?.sampleFlows ?? [];
+        const headers = [
+          "srcNamespace",
+          "srcPodName",
+          "dstNamespace",
+          "dstPodName",
+          "dstPort",
+          "protocol",
+          "originalVerdict",
+          "simulatedVerdict",
+          "verdictChanged",
+          "matchedRule",
+          "matchReason",
+        ];
+
+        const rows = sampleFlows.map((flow) => [
+          flow.srcNamespace,
+          flow.srcPodName ?? "",
+          flow.dstNamespace,
+          flow.dstPodName ?? "",
+          flow.dstPort.toString(),
+          flow.protocol,
+          flow.originalVerdict,
+          flow.simulatedVerdict,
+          flow.verdictChanged.toString(),
+          flow.matchedRule ?? "",
+          flow.matchReason ?? "",
+        ]);
+
+        const csvContent = [
+          headers.join(","),
+          ...rows.map((row) =>
+            row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+          ),
+        ].join("\n");
+
+        return {
+          format: "csv" as const,
+          filename: `simulation-${simulation.id}-flows.csv`,
+          content: csvContent,
+          mimeType: "text/csv",
+        };
+      }
+
+      // JSON export
+      const exportData = {
+        simulation: {
+          id: simulation.id,
+          name: simulation.name,
+          description: simulation.description,
+          status: simulation.status,
+          startTime: simulation.startTime.toISOString(),
+          endTime: simulation.endTime.toISOString(),
+          createdAt: simulation.createdAt.toISOString(),
+          completedAt: simulation.completedAt?.toISOString(),
+        },
+        policy: simulation.policy,
+        cluster: simulation.cluster,
+        runner: simulation.runner,
+        metrics: {
+          flowsAnalyzed: simulation.flowsAnalyzed,
+          flowsAllowed: simulation.flowsAllowed,
+          flowsDenied: simulation.flowsDenied,
+          flowsChanged: simulation.flowsChanged,
+        },
+        results: results ?? null,
+      };
+
+      return {
+        format: "json" as const,
+        filename: `simulation-${simulation.id}.json`,
+        content: JSON.stringify(exportData, null, 2),
+        mimeType: "application/json",
+      };
+    }),
 });

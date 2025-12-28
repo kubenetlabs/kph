@@ -27,6 +27,8 @@ model Organization {
   policies    Policy[]
   simulations Simulation[]
   apiTokens   ApiToken[]
+  packInstallations PolicyPackInstallation[]
+  subscription Subscription?
 
   @@map("organizations")
 }
@@ -52,6 +54,8 @@ model User {
   // Activity tracking
   policiesCreated  Policy[]     @relation("PolicyCreator")
   simulationsRun   Simulation[] @relation("SimulationRunner")
+  deploymentsTriggered PolicyDeployment[] @relation("DeploymentActor")
+  packInstallations PolicyPackInstallation[] @relation("PackInstaller")
 
   @@map("users")
 }
@@ -151,6 +155,10 @@ model Cluster {
   processSummaries  ProcessSummary[]
   policySimulations PolicySimulation[]
   notifications     Notification[]
+  policyDeployments PolicyDeployment[]
+  validationSummaries ValidationSummary[]
+  validationEvents    ValidationEvent[]
+  packDeployments     PolicyPackDeployment[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -232,6 +240,7 @@ model Policy {
   // Relationships
   versions    PolicyVersion[]
   simulations Simulation[]
+  deployments PolicyDeployment[]
 
   @@unique([clusterId, name])
   @@map("policies")
@@ -266,8 +275,291 @@ model PolicyVersion {
   policyId String
   policy   Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
+  // Deployments of this version
+  deployments PolicyDeployment[]
+
   @@unique([policyId, version])
   @@map("policy_versions")
+}
+
+// Track deployment history for policies
+model PolicyDeployment {
+  id          String   @id @default(cuid())
+
+  // What was deployed
+  policyId    String
+  policy      Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  versionId   String
+  version     PolicyVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  // Where it was deployed
+  clusterId   String
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  // Deployment status
+  status      DeploymentStatus @default(PENDING)
+
+  // Kubernetes resource info (after deployment)
+  resourceName      String?   // Name of created K8s resource
+  resourceNamespace String?   // Namespace (if applicable)
+  resourceVersion   String?   // K8s resourceVersion for conflict detection
+
+  // Who triggered the deployment
+  deployedById String
+  deployedBy   User @relation("DeploymentActor", fields: [deployedById], references: [id])
+
+  // Rollback tracking
+  previousDeploymentId String?
+  previousDeployment   PolicyDeployment? @relation("RollbackChain", fields: [previousDeploymentId], references: [id])
+  rollbackDeployments  PolicyDeployment[] @relation("RollbackChain")
+
+  isRollback    Boolean  @default(false)
+  rollbackNote  String?
+
+  // Error tracking
+  errorMessage  String?  @db.Text
+  errorDetails  Json?
+
+  // Timestamps
+  requestedAt   DateTime @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([policyId, requestedAt])
+  @@index([clusterId, requestedAt])
+  @@index([status])
+  @@map("policy_deployments")
+}
+
+enum DeploymentStatus {
+  PENDING     // Queued for deployment
+  IN_PROGRESS // Being applied to cluster
+  SUCCEEDED   // Successfully deployed
+  FAILED      // Deployment failed
+  ROLLED_BACK // Was rolled back
+}
+
+// ============================================================================
+// ENFORCEMENT VALIDATION
+// ============================================================================
+
+// Validation verdicts aggregated hourly
+model ValidationSummary {
+  id          String   @id @default(cuid())
+  clusterId   String
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  hour        DateTime // Bucket timestamp (start of hour)
+
+  // Verdict counts
+  allowedCount   Int @default(0)
+  blockedCount   Int @default(0)
+  noPolicyCount  Int @default(0)
+
+  // Top sources/destinations with NO_POLICY (coverage gaps)
+  coverageGaps   Json?  // Array of {srcNamespace, srcPodName, dstNamespace, dstPodName, dstPort, count}
+
+  // Top blocked flows (potential misconfigurations)
+  topBlocked     Json?  // Array of {srcNamespace, srcPodName, dstNamespace, dstPodName, policy, count}
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([clusterId, hour])
+  @@index([clusterId, hour])
+  @@map("validation_summaries")
+}
+
+// Individual validation events (kept short-term for debugging)
+model ValidationEvent {
+  id          String   @id @default(cuid())
+  clusterId   String
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  timestamp   DateTime
+  verdict     ValidationVerdict
+
+  srcNamespace  String
+  srcPodName    String?
+  srcLabels     Json?
+
+  dstNamespace  String
+  dstPodName    String?
+  dstLabels     Json?
+  dstPort       Int
+  protocol      String
+
+  matchedPolicy String?  // Policy name if applicable
+  reason        String?  // Human-readable explanation
+
+  createdAt   DateTime @default(now())
+
+  @@index([clusterId, timestamp])
+  @@index([clusterId, verdict])
+  @@index([timestamp]) // For TTL cleanup
+  @@map("validation_events")
+}
+
+enum ValidationVerdict {
+  ALLOWED    // Explicitly allowed by policy
+  BLOCKED    // Blocked (policy exists, no match)
+  NO_POLICY  // No policy governs this flow
+}
+
+// ============================================================================
+// POLICY PACK MARKETPLACE
+// ============================================================================
+
+// Policy pack definition
+model PolicyPack {
+  id          String   @id @default(cuid())
+  slug        String   @unique  // e.g., "soc2-network-controls"
+  name        String
+  description String   @db.Text
+
+  tier        PolicyPackTier
+  category    PolicyPackCategory
+
+  // For enterprise packs
+  complianceFramework String?    // "SOC2", "DORA", "PCI-DSS", "CIS"
+  auditorName         String?    // Third-party auditor
+  certificationDate   DateTime?
+
+  // Content
+  version     String
+  policies    PolicyPackItem[]
+
+  // Metadata
+  iconUrl     String?
+  docsUrl     String?
+  tags        String[]
+
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Usage tracking
+  installations PolicyPackInstallation[]
+
+  @@map("policy_packs")
+}
+
+enum PolicyPackTier {
+  COMMUNITY   // Free, community-reviewed
+  ENTERPRISE  // Paid, auditor-certified
+}
+
+enum PolicyPackCategory {
+  COMPLIANCE  // SOC2, DORA, PCI-DSS, CIS
+  WORKLOAD    // Microservices, databases, etc.
+  SECURITY    // General security patterns
+}
+
+// Individual policy within a pack
+model PolicyPackItem {
+  id          String     @id @default(cuid())
+  packId      String
+  pack        PolicyPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String     @db.Text
+  policyType  PolicyType
+  yamlContent String     @db.Text
+
+  // For enterprise: control mapping
+  controlIds  Json?      // e.g., ["CC6.1.1", "CC6.1.2"] for SOC2
+
+  order       Int        @default(0)
+
+  createdAt   DateTime   @default(now())
+
+  @@index([packId])
+  @@map("policy_pack_items")
+}
+
+// Track pack installations per organization
+model PolicyPackInstallation {
+  id             String       @id @default(cuid())
+  packId         String
+  pack           PolicyPack   @relation(fields: [packId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  installedAt    DateTime     @default(now())
+  installedById  String
+  installedBy    User         @relation("PackInstaller", fields: [installedById], references: [id])
+
+  // Which clusters have this pack deployed
+  deployments    PolicyPackDeployment[]
+
+  @@unique([packId, organizationId])
+  @@index([organizationId])
+  @@map("policy_pack_installations")
+}
+
+// Track pack deployment to specific clusters
+model PolicyPackDeployment {
+  id              String   @id @default(cuid())
+  installationId  String
+  installation    PolicyPackInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  clusterId       String
+  cluster         Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  status          PackDeploymentStatus @default(PENDING)
+  deployedAt      DateTime?
+  errorMessage    String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([installationId, clusterId])
+  @@index([clusterId])
+  @@map("policy_pack_deployments")
+}
+
+enum PackDeploymentStatus {
+  PENDING
+  DEPLOYING
+  DEPLOYED
+  FAILED
+}
+
+// Organization subscription for enterprise features
+model Subscription {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  tier           SubscriptionTier   @default(FREE)
+  status         SubscriptionStatus @default(ACTIVE)
+
+  // Stripe integration (optional)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionTier {
+  FREE
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+  TRIALING
 }
 
 // ============================================================================

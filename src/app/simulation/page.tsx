@@ -19,6 +19,15 @@ const statusConfig: Record<SimulationStatus, { variant: "muted" | "accent" | "su
   CANCELLED: { variant: "muted", label: "Cancelled" },
 };
 
+const statusOptions: { value: SimulationStatus | ""; label: string }[] = [
+  { value: "", label: "All Statuses" },
+  { value: "PENDING", label: "Pending" },
+  { value: "RUNNING", label: "Running" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "FAILED", label: "Failed" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
 function formatNumber(num: number): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
@@ -32,9 +41,21 @@ export default function SimulationPage() {
   const [selectedClusterId, setSelectedClusterId] = useState("");
   const [simulationDays, setSimulationDays] = useState(7);
 
-  // Fetch simulations
+  // Filter state
+  const [filterClusterId, setFilterClusterId] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<SimulationStatus | "">("");
+  const [filterPolicyId, setFilterPolicyId] = useState<string>("");
+
+  // Build query input based on filters
+  const queryInput = {
+    ...(filterClusterId && { clusterId: filterClusterId }),
+    ...(filterStatus && { status: filterStatus as SimulationStatus }),
+    ...(filterPolicyId && { policyId: filterPolicyId }),
+  };
+
+  // Fetch simulations with filters
   const { data: simulations, isLoading } = trpc.simulation.list.useQuery(
-    undefined,
+    Object.keys(queryInput).length > 0 ? queryInput : undefined,
     { refetchInterval: 5000 } // Poll every 5 seconds for running simulations
   );
 
@@ -134,6 +155,75 @@ export default function SimulationPage() {
           <p className="text-sm text-muted">Impacts Found</p>
         </Card>
       </div>
+
+      {/* Filters */}
+      <Card className="mb-6">
+        <CardContent className="py-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted whitespace-nowrap">Cluster:</label>
+              <select
+                value={filterClusterId}
+                onChange={(e) => setFilterClusterId(e.target.value)}
+                className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[160px]"
+              >
+                <option value="">All Clusters</option>
+                {clusters.map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted whitespace-nowrap">Status:</label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as SimulationStatus | "")}
+                className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[140px]"
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted whitespace-nowrap">Policy:</label>
+              <select
+                value={filterPolicyId}
+                onChange={(e) => setFilterPolicyId(e.target.value)}
+                className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[180px]"
+              >
+                <option value="">All Policies</option>
+                {policies.map((policy) => (
+                  <option key={policy.id} value={policy.id}>
+                    {policy.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {(filterClusterId || filterStatus || filterPolicyId) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFilterClusterId("");
+                  setFilterStatus("");
+                  setFilterPolicyId("");
+                }}
+                className="text-muted hover:text-foreground"
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Loading State */}
       {isLoading && (

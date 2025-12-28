@@ -8,6 +8,156 @@ import {
   requireScope,
 } from "~/lib/api-auth";
 
+// Schema for flow query parameters
+const flowQuerySchema = z.object({
+  startTime: z.string().datetime(),
+  endTime: z.string().datetime(),
+  namespaces: z.array(z.string()).optional(),
+  srcNamespace: z.string().optional(),
+  dstNamespace: z.string().optional(),
+  verdict: z.enum(["ALLOWED", "DENIED", "AUDIT", "UNKNOWN"]).optional(),
+  limit: z.coerce.number().int().min(1).max(10000).default(1000),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/**
+ * GET /api/operator/flows
+ * Query flow records for on-demand simulation.
+ * Supports filtering by time range, namespaces, and verdict.
+ */
+export async function GET(request: NextRequest) {
+  // Authenticate the operator
+  const auth = await authenticateOperatorToken(
+    request.headers.get("Authorization")
+  );
+  if (!auth) {
+    return unauthorized();
+  }
+
+  // Check required scope - simulation:read allows querying flows for simulation
+  const scopeError = requireScope(auth, "simulation:read");
+  if (scopeError) return scopeError;
+
+  try {
+    const { searchParams } = new URL(request.url);
+
+    // Parse query parameters
+    const queryParams = {
+      startTime: searchParams.get("startTime"),
+      endTime: searchParams.get("endTime"),
+      namespaces: searchParams.get("namespaces")?.split(",").filter(Boolean),
+      srcNamespace: searchParams.get("srcNamespace"),
+      dstNamespace: searchParams.get("dstNamespace"),
+      verdict: searchParams.get("verdict"),
+      limit: searchParams.get("limit") ?? "1000",
+      offset: searchParams.get("offset") ?? "0",
+    };
+
+    // Validate query parameters
+    const validationResult = flowQuerySchema.safeParse(queryParams);
+    if (!validationResult.success) {
+      return NextResponse.json(
+        {
+          error: "Invalid query parameters",
+          details: validationResult.error.errors.map((e) => ({
+            field: e.path.join("."),
+            message: e.message,
+          })),
+        },
+        { status: 400 }
+      );
+    }
+
+    const { startTime, endTime, namespaces, srcNamespace, dstNamespace, verdict, limit, offset } =
+      validationResult.data;
+
+    // Build WHERE clause
+    const where: Prisma.FlowRecordWhereInput = {
+      clusterId: auth.clusterId,
+      timestamp: {
+        gte: new Date(startTime),
+        lte: new Date(endTime),
+      },
+    };
+
+    // Add namespace filters
+    if (namespaces && namespaces.length > 0) {
+      where.OR = [
+        { srcNamespace: { in: namespaces } },
+        { dstNamespace: { in: namespaces } },
+      ];
+    }
+    if (srcNamespace) {
+      where.srcNamespace = srcNamespace;
+    }
+    if (dstNamespace) {
+      where.dstNamespace = dstNamespace;
+    }
+    if (verdict) {
+      where.verdict = verdict;
+    }
+
+    // Query flows with count
+    const [flows, totalCount] = await Promise.all([
+      db.flowRecord.findMany({
+        where,
+        orderBy: { timestamp: "asc" },
+        take: limit,
+        skip: offset,
+        select: {
+          id: true,
+          timestamp: true,
+          srcNamespace: true,
+          srcPodName: true,
+          srcPodLabels: true,
+          srcIP: true,
+          srcPort: true,
+          dstNamespace: true,
+          dstPodName: true,
+          dstPodLabels: true,
+          dstIP: true,
+          dstPort: true,
+          protocol: true,
+          l7Protocol: true,
+          httpMethod: true,
+          httpPath: true,
+          httpStatus: true,
+          verdict: true,
+          bytesTotal: true,
+          packetsTotal: true,
+        },
+      }),
+      db.flowRecord.count({ where }),
+    ]);
+
+    // Transform BigInt values to numbers for JSON serialization
+    const transformedFlows = flows.map((flow) => ({
+      ...flow,
+      timestamp: flow.timestamp.toISOString(),
+      bytesTotal: flow.bytesTotal ? Number(flow.bytesTotal) : null,
+      packetsTotal: flow.packetsTotal ? Number(flow.packetsTotal) : null,
+    }));
+
+    return NextResponse.json({
+      success: true,
+      flows: transformedFlows,
+      pagination: {
+        total: totalCount,
+        limit,
+        offset,
+        hasMore: offset + flows.length < totalCount,
+      },
+    });
+  } catch (error) {
+    console.error("Error querying flows:", error);
+
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 const flowRecordSchema = z.object({
   timestamp: z.string().datetime(),
   srcNamespace: z.string(),

@@ -53,6 +53,12 @@ export default function PolicyDetailPage() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isSimulationModalOpen, setIsSimulationModalOpen] = useState(false);
   const [simulationDays, setSimulationDays] = useState(7);
+  const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
+  const [selectedRollbackDeployment, setSelectedRollbackDeployment] = useState<{
+    id: string;
+    version: number;
+  } | null>(null);
+  const [rollbackNote, setRollbackNote] = useState("");
 
   const utils = trpc.useUtils();
 
@@ -99,6 +105,23 @@ export default function PolicyDetailPage() {
     onSuccess: () => {
       setIsSimulationModalOpen(false);
       router.push("/simulation");
+    },
+  });
+
+  // Fetch deployment history
+  const { data: deployments } = trpc.deployment.listByPolicy.useQuery(
+    { policyId, limit: 10 },
+    { enabled: !!policyId }
+  );
+
+  // Rollback mutation
+  const rollbackMutation = trpc.deployment.rollback.useMutation({
+    onSuccess: () => {
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.deployment.listByPolicy.invalidate({ policyId });
+      setIsRollbackModalOpen(false);
+      setSelectedRollbackDeployment(null);
+      setRollbackNote("");
     },
   });
 
@@ -161,6 +184,21 @@ export default function PolicyDetailPage() {
   const handleClonePolicy = () => {
     if (!policy) return;
     router.push(`/policies/new?cloneFrom=${policy.id}`);
+  };
+
+  const handleRollback = () => {
+    if (!selectedRollbackDeployment) return;
+    rollbackMutation.mutate({
+      policyId,
+      targetDeploymentId: selectedRollbackDeployment.id,
+      note: rollbackNote || undefined,
+    });
+  };
+
+  const openRollbackModal = (deploymentId: string, version: number) => {
+    setSelectedRollbackDeployment({ id: deploymentId, version });
+    setRollbackNote("");
+    setIsRollbackModalOpen(true);
   };
 
   if (isLoading) {
@@ -342,6 +380,94 @@ export default function PolicyDetailPage() {
                       </Badge>
                     </div>
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Deployment History */}
+          {deployments && deployments.deployments.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Deployment History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {deployments.deployments.map((deployment, idx) => {
+                    const isLatestSuccess = idx === 0 && deployment.status === "SUCCEEDED";
+                    const canRollback = deployment.status === "SUCCEEDED" && !isLatestSuccess;
+
+                    return (
+                      <div
+                        key={deployment.id}
+                        className={`flex items-center justify-between rounded-md border p-3 ${
+                          isLatestSuccess
+                            ? "border-success/30 bg-success/5"
+                            : "border-card-border"
+                        }`}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">
+                              Version {deployment.version.version}
+                            </span>
+                            {deployment.isRollback && (
+                              <Badge variant="warning">Rollback</Badge>
+                            )}
+                            {isLatestSuccess && (
+                              <Badge variant="success">Current</Badge>
+                            )}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                            <span>
+                              By {deployment.deployedBy.name ?? deployment.deployedBy.email}
+                            </span>
+                            {deployment.completedAt && (
+                              <span>
+                                {new Date(deployment.completedAt).toLocaleString()}
+                              </span>
+                            )}
+                            {deployment.rollbackNote && (
+                              <span className="italic">
+                                &quot;{deployment.rollbackNote}&quot;
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={
+                              deployment.status === "SUCCEEDED"
+                                ? "success"
+                                : deployment.status === "FAILED"
+                                ? "danger"
+                                : deployment.status === "IN_PROGRESS"
+                                ? "accent"
+                                : deployment.status === "ROLLED_BACK"
+                                ? "warning"
+                                : "muted"
+                            }
+                          >
+                            {deployment.status.replace("_", " ")}
+                          </Badge>
+                          {canRollback && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                openRollbackModal(
+                                  deployment.id,
+                                  deployment.version.version
+                                )
+                              }
+                            >
+                              Rollback
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -603,6 +729,67 @@ export default function PolicyDetailPage() {
           {simulationMutation.error && (
             <p className="mt-2 text-sm text-danger">
               {simulationMutation.error.message}
+            </p>
+          )}
+        </div>
+      </Modal>
+
+      {/* Rollback Modal */}
+      <Modal
+        isOpen={isRollbackModalOpen}
+        onClose={() => {
+          setIsRollbackModalOpen(false);
+          setSelectedRollbackDeployment(null);
+          setRollbackNote("");
+        }}
+        title="Rollback Policy"
+        description={`Rollback to version ${selectedRollbackDeployment?.version ?? ""}`}
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="rounded-md bg-warning/10 border border-warning/30 p-3">
+            <p className="text-sm text-warning">
+              This will deploy version {selectedRollbackDeployment?.version} to the cluster,
+              replacing the current deployment.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Rollback note (optional)
+            </label>
+            <textarea
+              value={rollbackNote}
+              onChange={(e) => setRollbackNote(e.target.value)}
+              placeholder="Why are you rolling back?"
+              className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted resize-none"
+              rows={3}
+            />
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setIsRollbackModalOpen(false);
+                setSelectedRollbackDeployment(null);
+                setRollbackNote("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleRollback}
+              isLoading={rollbackMutation.isPending}
+            >
+              Confirm Rollback
+            </Button>
+          </div>
+
+          {rollbackMutation.error && (
+            <p className="mt-2 text-sm text-danger">
+              {rollbackMutation.error.message}
             </p>
           )}
         </div>
