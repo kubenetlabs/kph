@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	policyv1alpha1 "github.com/policy-hub/operator/api/v1alpha1"
@@ -28,15 +30,16 @@ const (
 
 // Reconciler handles synchronization between SaaS and cluster
 type Reconciler struct {
-	client       client.Client
-	saasClient   *saas.Client
-	deployer     *policy.Deployer
-	log          logr.Logger
-	config       *policyv1alpha1.PolicyHubConfig
-	operatorID   string
-	registered   bool
-	lastSync     time.Time
+	client        client.Client
+	saasClient    *saas.Client
+	deployer      *policy.Deployer
+	log           logr.Logger
+	config        *policyv1alpha1.PolicyHubConfig
+	operatorID    string
+	registered    bool
+	lastSync      time.Time
 	lastHeartbeat time.Time
+	statusMu      sync.Mutex // Serializes status updates to prevent conflicts
 }
 
 // NewReconciler creates a new sync reconciler
@@ -621,40 +624,39 @@ func (r *Reconciler) getClusterInfo(ctx context.Context) (nodeCount, namespaceCo
 	return
 }
 
-// updateConfigStatus updates the PolicyHubConfig status
+// updateConfigStatus updates the PolicyHubConfig status with retry on conflict.
+// Uses a mutex to serialize status updates from concurrent goroutines (sync, heartbeat, controller).
 func (r *Reconciler) updateConfigStatus(ctx context.Context, mutate func(*policyv1alpha1.PolicyHubConfigStatus)) error {
-	config := &policyv1alpha1.PolicyHubConfig{}
-	if err := r.client.Get(ctx, types.NamespacedName{
-		Name:      r.config.Name,
-		Namespace: r.config.Namespace,
-	}, config); err != nil {
-		return err
-	}
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
 
-	mutate(&config.Status)
-	return r.client.Status().Update(ctx, config)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		config := &policyv1alpha1.PolicyHubConfig{}
+		if err := r.client.Get(ctx, types.NamespacedName{
+			Name:      r.config.Name,
+			Namespace: r.config.Namespace,
+		}, config); err != nil {
+			return err
+		}
+
+		mutate(&config.Status)
+		return r.client.Status().Update(ctx, config)
+	})
 }
 
-// updatePolicyStatus updates a ManagedPolicy status
+// updatePolicyStatus updates a ManagedPolicy status with retry on conflict
 func (r *Reconciler) updatePolicyStatus(ctx context.Context, mp *policyv1alpha1.ManagedPolicy, phase policyv1alpha1.ManagedPolicyPhase, errMsg string) error {
-	mp.Status.Phase = phase
-	mp.Status.LastError = errMsg
-	mp.Status.ObservedGeneration = mp.Generation
-
-	if err := r.client.Status().Update(ctx, mp); err != nil {
-		if errors.IsConflict(err) {
-			// Refetch and retry
-			fresh := &policyv1alpha1.ManagedPolicy{}
-			if err := r.client.Get(ctx, types.NamespacedName{Name: mp.Name, Namespace: mp.Namespace}, fresh); err != nil {
-				return err
-			}
-			fresh.Status.Phase = phase
-			fresh.Status.LastError = errMsg
-			return r.client.Status().Update(ctx, fresh)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Refetch to get latest resourceVersion
+		fresh := &policyv1alpha1.ManagedPolicy{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: mp.Name, Namespace: mp.Namespace}, fresh); err != nil {
+			return err
 		}
-		return err
-	}
-	return nil
+		fresh.Status.Phase = phase
+		fresh.Status.LastError = errMsg
+		fresh.Status.ObservedGeneration = fresh.Generation
+		return r.client.Status().Update(ctx, fresh)
+	})
 }
 
 // setCondition sets or updates a condition in the conditions slice

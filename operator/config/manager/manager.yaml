@@ -57,7 +57,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/policy-hub/operator:latest
+          image: ghcr.io/henleda/policy-hub-operator:latest
           imagePullPolicy: Always
           args:
             - --leader-elect

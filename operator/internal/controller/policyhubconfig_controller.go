@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	stdsync "sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -16,12 +17,14 @@ import (
 // PolicyHubConfigReconciler reconciles a PolicyHubConfig object
 type PolicyHubConfigReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	Log          logr.Logger
-	Reconciler   *sync.Reconciler
-	syncTicker   *time.Ticker
-	hbTicker     *time.Ticker
-	stopChan     chan struct{}
+	Scheme            *runtime.Scheme
+	Log               logr.Logger
+	Reconciler        *sync.Reconciler
+	syncTicker        *time.Ticker
+	hbTicker          *time.Ticker
+	stopChan          chan struct{}
+	lastReconcileSync time.Time      // Track last sync from Reconcile to avoid redundant syncs
+	syncMu            stdsync.Mutex  // Protects lastReconcileSync
 }
 
 // +kubebuilder:rbac:groups=policyhub.io,resources=policyhubconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -69,10 +72,23 @@ func (r *PolicyHubConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// This handles both fresh registration and restarts where we restored from bootstrapped state
 	r.startBackgroundTasks()
 
-	// Trigger immediate sync
-	if err := r.Reconciler.SyncPolicies(ctx); err != nil {
-		log.Error(err, "Failed to sync policies")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// Only trigger sync if we haven't synced recently (avoid redundant syncs when
+	// background tasks are already running). Always sync on first reconcile.
+	syncInterval := r.Reconciler.GetSyncInterval()
+	r.syncMu.Lock()
+	shouldSync := r.lastReconcileSync.IsZero() || time.Since(r.lastReconcileSync) > syncInterval/2
+	if shouldSync {
+		r.lastReconcileSync = time.Now()
+	}
+	r.syncMu.Unlock()
+
+	if shouldSync {
+		if err := r.Reconciler.SyncPolicies(ctx); err != nil {
+			log.Error(err, "Failed to sync policies")
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	} else {
+		log.V(1).Info("Skipping sync, recent sync already performed")
 	}
 
 	return ctrl.Result{}, nil
@@ -98,6 +114,11 @@ func (r *PolicyHubConfigReconciler) startBackgroundTasks() {
 		for {
 			select {
 			case <-r.syncTicker.C:
+				// Update lastReconcileSync to coordinate with controller's Reconcile
+				r.syncMu.Lock()
+				r.lastReconcileSync = time.Now()
+				r.syncMu.Unlock()
+
 				if err := r.Reconciler.SyncPolicies(bgCtx); err != nil {
 					r.Log.Error(err, "Background sync failed")
 				}

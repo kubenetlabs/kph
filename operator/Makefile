@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/policy-hub/operator:latest
+IMG ?= ghcr.io/henleda/policy-hub-operator:latest
 
 # Get the currently used golang install path
 GOBIN ?= $(shell go env GOBIN)
