@@ -174,6 +174,14 @@ export default function TopologyPage() {
               <span className="text-muted">
                 {topologyData.summary.totalEdges} flows
               </span>
+              <span className="text-green-500">
+                {topologyData.summary.allowedFlows} allowed
+              </span>
+              {topologyData.summary.deniedFlows > 0 && (
+                <Badge variant="destructive">
+                  {topologyData.summary.deniedFlows} denied
+                </Badge>
+              )}
               {topologyData.summary.unprotectedFlows > 0 && (
                 <Badge variant="warning">
                   {topologyData.summary.unprotectedFlows} gaps
