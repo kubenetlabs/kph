@@ -64,7 +64,7 @@ export const topologyRouter = createTRPCRouter({
       for (const policy of policies) {
         // Parse policy YAML to extract endpoints
         try {
-          const yaml = policy.yamlContent;
+          const yaml = policy.content;
           // Extract namespace from metadata
           const nsMatch = yaml.match(/namespace:\s*(\S+)/);
           const ns = nsMatch?.[1] ?? "default";
@@ -92,7 +92,7 @@ export const topologyRouter = createTRPCRouter({
           data: {
             label: ns,
             workloadCount: Array.from(workloads.values()).filter((w) => w.namespace === ns).length,
-            policyCount: policies.filter((p) => p.yamlContent.includes(`namespace: ${ns}`)).length,
+            policyCount: policies.filter((p) => p.content.includes(`namespace: ${ns}`)).length,
           },
         });
 
@@ -178,13 +178,13 @@ export const topologyRouter = createTRPCRouter({
           },
         },
         select: {
-          yamlContent: true,
+          content: true,
         },
       });
 
       const namespaces = new Set<string>();
       for (const policy of policies) {
-        const nsMatch = policy.yamlContent.match(/namespace:\s*(\S+)/);
+        const nsMatch = policy.content.match(/namespace:\s*(\S+)/);
         if (nsMatch?.[1]) {
           namespaces.add(nsMatch[1]);
         }
