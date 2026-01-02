@@ -760,3 +760,48 @@ func (r *Reconciler) GetHeartbeatInterval() time.Duration {
 	}
 	return 60 * time.Second
 }
+
+// GetFlowCollectionConfig returns the flow collection configuration
+func (r *Reconciler) GetFlowCollectionConfig() *policyv1alpha1.FlowCollectionSpec {
+	if r.config != nil {
+		return r.config.Spec.FlowCollection
+	}
+	return nil
+}
+
+// GetTelemetryEndpoint returns the SaaS telemetry endpoint
+func (r *Reconciler) GetTelemetryEndpoint() string {
+	if r.config != nil {
+		return r.config.Spec.SaaSEndpoint + "/api/operator/telemetry/aggregates"
+	}
+	return ""
+}
+
+// GetClusterID returns the cluster ID
+func (r *Reconciler) GetClusterID() string {
+	if r.config != nil && r.config.Status.ClusterID != "" {
+		return r.config.Status.ClusterID
+	}
+	if r.config != nil {
+		return r.config.Spec.ClusterID
+	}
+	return ""
+}
+
+// GetAPIToken returns the API token for SaaS communication
+func (r *Reconciler) GetAPIToken(ctx context.Context) (string, error) {
+	if r.config == nil {
+		return "", fmt.Errorf("config not initialized")
+	}
+	// Try to get from cluster token secret first (bootstrap mode)
+	if r.config.Status.Bootstrapped {
+		return r.getClusterToken(ctx, r.config)
+	}
+	// Fall back to API token secret ref
+	return r.getAPIToken(ctx, r.config)
+}
+
+// GetLogger returns the reconciler's logger
+func (r *Reconciler) GetLogger() logr.Logger {
+	return r.log
+}
