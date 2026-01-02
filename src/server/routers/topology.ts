@@ -35,20 +35,45 @@ export const topologyRouter = createTRPCRouter({
       const since = new Date(Date.now() - timeRangeMinutes * 60 * 1000);
 
       // Query flow summaries for this cluster
-      const flowSummaries = await ctx.db.flowSummary.findMany({
-        where: {
-          clusterId: input.clusterId,
-          timestamp: { gte: since },
-          ...(input.filters?.namespaces?.length ? {
+      // Run two queries in parallel: one for recent flows, one for dropped/denied flows
+      // This ensures policy-blocked traffic is visible even with high flow volumes
+      const baseWhere = {
+        clusterId: input.clusterId,
+        timestamp: { gte: since },
+        ...(input.filters?.namespaces?.length ? {
+          OR: [
+            { srcNamespace: { in: input.filters.namespaces } },
+            { dstNamespace: { in: input.filters.namespaces } },
+          ],
+        } : {}),
+      };
+
+      const [recentFlows, policyBlockedFlows] = await Promise.all([
+        ctx.db.flowSummary.findMany({
+          where: baseWhere,
+          orderBy: { timestamp: "desc" },
+          take: 2000,
+        }),
+        // Ensure dropped/denied flows are always included
+        ctx.db.flowSummary.findMany({
+          where: {
+            ...baseWhere,
             OR: [
-              { srcNamespace: { in: input.filters.namespaces } },
-              { dstNamespace: { in: input.filters.namespaces } },
+              { droppedFlows: { gt: 0 } },
+              { deniedFlows: { gt: 0 } },
             ],
-          } : {}),
-        },
-        orderBy: { timestamp: "desc" },
-        take: 1000, // Limit for performance
-      });
+          },
+          orderBy: { timestamp: "desc" },
+          take: 500,
+        }),
+      ]);
+
+      // Merge and deduplicate by id
+      const flowMap = new Map<string, typeof recentFlows[0]>();
+      for (const flow of [...recentFlows, ...policyBlockedFlows]) {
+        flowMap.set(flow.id, flow);
+      }
+      const flowSummaries = Array.from(flowMap.values());
 
       // Build nodes and edges from flow data
       const nodes: Array<{
