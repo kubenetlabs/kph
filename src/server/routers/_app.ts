@@ -6,6 +6,7 @@ import { deploymentRouter } from "./deployment";
 import { validationRouter } from "./validation";
 import { marketplaceRouter } from "./marketplace";
 import { onboardingRouter } from "./onboarding";
+import { topologyRouter } from "./topology";
 
 /**
  * Root router for the application
@@ -19,6 +20,7 @@ export const appRouter = createTRPCRouter({
   validation: validationRouter,
   marketplace: marketplaceRouter,
   onboarding: onboardingRouter,
+  topology: topologyRouter,
 });
 
 // Export type for client usage

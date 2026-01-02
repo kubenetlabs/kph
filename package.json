@@ -29,6 +29,7 @@
     "@trpc/client": "^11.0.0-rc.297",
     "@trpc/react-query": "^11.0.0-rc.297",
     "@trpc/server": "^11.0.0-rc.297",
+    "@xyflow/react": "^12.10.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "next": "^14.1.0",
@@ -36,7 +37,8 @@
     "react-dom": "^18.2.0",
     "superjson": "^2.2.0",
     "tailwind-merge": "^2.6.0",
-    "zod": "^3.22.0"
+    "zod": "^3.22.0",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
