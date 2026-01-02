@@ -91,7 +91,7 @@ export const topologyRouter = createTRPCRouter({
         const srcIsExternal = !flow.srcNamespace || flow.srcNamespace === "" || flow.srcNamespace === "external";
         const srcId = srcIsExternal
           ? "external-world"
-          : `${flow.srcNamespace}/${flow.srcPodName || "unknown"}`;
+          : `${flow.srcNamespace}/${flow.srcPodName ?? "unknown"}`;
 
         if (!endpoints.has(srcId)) {
           endpoints.set(srcId, {
@@ -108,7 +108,7 @@ export const topologyRouter = createTRPCRouter({
         const dstIsExternal = !flow.dstNamespace || flow.dstNamespace === "" || flow.dstNamespace === "external";
         const dstId = dstIsExternal
           ? "external-world"
-          : `${flow.dstNamespace}/${flow.dstPodName || "unknown"}`;
+          : `${flow.dstNamespace}/${flow.dstPodName ?? "unknown"}`;
 
         if (!endpoints.has(dstId)) {
           endpoints.set(dstId, {
@@ -155,7 +155,7 @@ export const topologyRouter = createTRPCRouter({
       }
 
       // Count workloads per namespace
-      for (const [id, endpoint] of endpoints) {
+      for (const [, endpoint] of endpoints) {
         if (!endpoint.isExternal && namespaces.has(endpoint.namespace)) {
           namespaces.get(endpoint.namespace)!.workloadCount++;
         }
@@ -200,7 +200,7 @@ export const topologyRouter = createTRPCRouter({
         workloadPositions.set(id, position);
 
         // Extract pod name for display
-        const displayName = endpoint.podName || id.split("/")[1] || "unknown";
+        const displayName = endpoint.podName ?? id.split("/")[1] ?? "unknown";
 
         nodes.push({
           id,
