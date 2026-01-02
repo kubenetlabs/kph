@@ -64,7 +64,7 @@ export const authOptions: NextAuthOptions = {
   ],
 
   session: {
-    strategy: "database",
+    strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days
     updateAge: 24 * 60 * 60, // Update session every 24 hours
   },
@@ -77,10 +77,10 @@ export const authOptions: NextAuthOptions = {
   },
 
   callbacks: {
-    async session({ session, user }) {
-      // Add user ID and organization info to session
-      if (session.user) {
-        session.user.id = user.id;
+    async jwt({ token, user, account }) {
+      // On initial sign in, add user data to token
+      if (user) {
+        token.id = user.id;
 
         // Fetch user with organization
         const dbUser = await db.user.findUnique({
@@ -89,12 +89,24 @@ export const authOptions: NextAuthOptions = {
         });
 
         if (dbUser) {
-          session.user.role = dbUser.role;
-          session.user.organizationId = dbUser.organizationId;
-          session.user.organizationName = dbUser.organization?.name;
-          session.user.organizationSlug = dbUser.organization?.slug;
-          session.user.needsOnboarding = !dbUser.organizationId;
+          token.role = dbUser.role;
+          token.organizationId = dbUser.organizationId;
+          token.organizationName = dbUser.organization?.name;
+          token.organizationSlug = dbUser.organization?.slug;
         }
+      }
+      return token;
+    },
+
+    async session({ session, token }) {
+      // Add token data to session
+      if (session.user && token) {
+        session.user.id = token.id as string;
+        session.user.role = token.role as string;
+        session.user.organizationId = token.organizationId as string | null;
+        session.user.organizationName = token.organizationName as string | null;
+        session.user.organizationSlug = token.organizationSlug as string | null;
+        session.user.needsOnboarding = !token.organizationId;
       }
       return session;
     },
