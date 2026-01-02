@@ -13,7 +13,7 @@ export const onboardingRouter = createTRPCRouter({
    */
   checkStatus: protectedProcedure.query(async ({ ctx }) => {
     // Try to find the user in our database
-    let user = await ctx.db.user.findUnique({
+    const user = await ctx.db.user.findUnique({
       where: { id: ctx.userId },
       include: { organization: true },
     });

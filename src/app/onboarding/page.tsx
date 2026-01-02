@@ -16,7 +16,6 @@ export default function OnboardingPage() {
   const [orgName, setOrgName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugError, setSlugError] = useState<string | null>(null);
-  const [isCheckingSlug, setIsCheckingSlug] = useState(false);
 
   // Check onboarding status
   const { data: status, isLoading: isLoadingStatus } = trpc.onboarding.checkStatus.useQuery(
@@ -33,7 +32,7 @@ export default function OnboardingPage() {
   });
 
   // Slug suggestion query
-  const { data: suggestedSlug, isFetching: isFetchingSlug } = trpc.onboarding.suggestSlug.useQuery(
+  const { data: suggestedSlug } = trpc.onboarding.suggestSlug.useQuery(
     { name: orgName },
     { enabled: orgName.length >= 2 }
   );
@@ -124,15 +123,15 @@ export default function OnboardingPage() {
         {step === "welcome" && (
           <Card>
             <CardHeader className="text-center">
-              <CardTitle>Welcome, {user?.fullName || user?.primaryEmailAddress?.emailAddress}!</CardTitle>
+              <CardTitle>Welcome, {user?.fullName ?? user?.primaryEmailAddress?.emailAddress}!</CardTitle>
               <CardDescription>
-                Let's get you set up with your organization
+                {"Let's get you set up with your organization"}
               </CardDescription>
             </CardHeader>
             <CardContent className="text-center">
               <div className="mb-6 space-y-4">
                 <div className="rounded-lg bg-card-hover p-4">
-                  <h4 className="font-medium text-foreground mb-2">What you'll be able to do:</h4>
+                  <h4 className="font-medium text-foreground mb-2">{"What you'll be able to do:"}</h4>
                   <ul className="text-sm text-muted space-y-2 text-left">
                     <li className="flex items-start gap-2">
                       <svg className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -195,8 +194,8 @@ export default function OnboardingPage() {
                   onChange={(e) => handleSlugChange(e.target.value)}
                   error={!!slugError}
                   helperText={
-                    slugError ||
-                    "Used in URLs: policyhub.io/org/" + (slug || "your-slug")
+                    slugError ??
+                    `Used in URLs: policyhub.io/org/${slug ?? "your-slug"}`
                   }
                 />
                 {slug && !slugError && slugAvailability?.available && (

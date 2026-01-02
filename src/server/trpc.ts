@@ -19,7 +19,7 @@ export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
 
   if (clerkUserId) {
     // Find or create user in our database
-    let user = await db.user.findFirst({
+    const user = await db.user.findFirst({
       where: { id: clerkUserId },
       include: { organization: true },
     });
