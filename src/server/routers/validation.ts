@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
+
+// Use orgProtectedProcedure for all validation operations (requires organization)
+const protectedProcedure = orgProtectedProcedure;
 
 // Type definitions for JSON fields
 interface CoverageGap {

@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
 import { encrypt, generateApiToken } from "~/lib/encryption";
 import { testKubernetesConnection } from "~/lib/kubernetes-client";
+
+// Use orgProtectedProcedure for all cluster operations (requires organization)
+const protectedProcedure = orgProtectedProcedure;
 
 // Schema for creating a cluster
 const createClusterSchema = z.object({

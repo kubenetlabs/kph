@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
+
+// Use orgProtectedProcedure for all policy operations (requires organization)
+const protectedProcedure = orgProtectedProcedure;
 
 // Enum schemas matching Prisma
 const PolicyTypeSchema = z.enum([

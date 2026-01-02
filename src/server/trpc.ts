@@ -1,23 +1,24 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { type FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
+import { getServerSession } from "next-auth";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { db } from "~/lib/db";
+import { authOptions } from "~/lib/auth";
 
 /**
  * Context creation for tRPC
- * This runs for each request and makes the database available to all procedures
+ * This runs for each request and makes the database and session available to all procedures
  */
 export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
-  // In a real app, you would get the session/user from NextAuth here
-  // For now, we'll use mock organization and user IDs
-  const mockOrganizationId = "org_demo";
-  const mockUserId = "user_demo";
+  // Get the session from NextAuth
+  const session = await getServerSession(authOptions);
 
   return {
     db,
-    organizationId: mockOrganizationId,
-    userId: mockUserId,
+    session,
+    userId: session?.user?.id ?? null,
+    organizationId: session?.user?.organizationId ?? null,
     headers: opts.req.headers,
   };
 };
@@ -58,16 +59,42 @@ export const publicProcedure = t.procedure;
  * Ensures user is authenticated before running
  */
 export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
-  // In a real app, you would check ctx.session here
-  if (!ctx.userId || !ctx.organizationId) {
+  if (!ctx.session?.user?.id) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }
 
   return next({
     ctx: {
       ...ctx,
-      userId: ctx.userId,
-      organizationId: ctx.organizationId,
+      session: ctx.session,
+      userId: ctx.session.user.id,
+      organizationId: ctx.session.user.organizationId ?? null,
+    },
+  });
+});
+
+/**
+ * Organization-protected procedure
+ * Ensures user is authenticated AND has an organization
+ */
+export const orgProtectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.session?.user?.id) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+
+  if (!ctx.session.user.organizationId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Organization required. Please complete onboarding.",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      session: ctx.session,
+      userId: ctx.session.user.id,
+      organizationId: ctx.session.user.organizationId,
     },
   });
 });

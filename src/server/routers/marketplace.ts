@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
+
+// Use orgProtectedProcedure for all marketplace operations (requires organization)
+const protectedProcedure = orgProtectedProcedure;
 
 const PolicyPackTierSchema = z.enum(["COMMUNITY", "ENTERPRISE"]);
 const PolicyPackCategorySchema = z.enum(["COMPLIANCE", "WORKLOAD", "SECURITY"]);
