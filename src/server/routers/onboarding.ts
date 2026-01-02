@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
 /**
@@ -11,14 +12,23 @@ export const onboardingRouter = createTRPCRouter({
    * Check if user needs onboarding
    */
   checkStatus: protectedProcedure.query(async ({ ctx }) => {
-    const user = await ctx.db.user.findUnique({
+    // Try to find the user in our database
+    let user = await ctx.db.user.findUnique({
       where: { id: ctx.userId },
       include: { organization: true },
     });
 
+    // If user doesn't exist in DB, they need onboarding
+    if (!user) {
+      return {
+        needsOnboarding: true,
+        organization: null,
+      };
+    }
+
     return {
-      needsOnboarding: !user?.organizationId,
-      organization: user?.organization ?? null,
+      needsOnboarding: !user.organizationId,
+      organization: user.organization ?? null,
     };
   }),
 
@@ -52,19 +62,28 @@ export const onboardingRouter = createTRPCRouter({
         });
       }
 
-      // Check if user already has an organization
-      const user = await ctx.db.user.findUnique({
+      // Check if user exists and already has an organization
+      const existingUser = await ctx.db.user.findUnique({
         where: { id: ctx.userId },
       });
 
-      if (user?.organizationId) {
+      if (existingUser?.organizationId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "You are already part of an organization",
         });
       }
 
-      // Create organization and update user in a transaction
+      // Get Clerk user details for creating the DB user
+      const clerkUser = await currentUser();
+      if (!clerkUser) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Unable to get user details",
+        });
+      }
+
+      // Create organization, user (if needed), and update in a transaction
       const organization = await ctx.db.$transaction(async (tx) => {
         // Create the organization
         const org = await tx.organization.create({
@@ -83,10 +102,17 @@ export const onboardingRouter = createTRPCRouter({
           },
         });
 
-        // Update user to be part of the org with ADMIN role
-        await tx.user.update({
+        // Create or update user with org membership
+        await tx.user.upsert({
           where: { id: ctx.userId },
-          data: {
+          create: {
+            id: ctx.userId,
+            email: clerkUser.emailAddresses[0]?.emailAddress ?? "",
+            name: clerkUser.fullName ?? clerkUser.firstName ?? null,
+            organizationId: org.id,
+            role: "ADMIN",
+          },
+          update: {
             organizationId: org.id,
             role: "ADMIN",
           },

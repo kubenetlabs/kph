@@ -1,24 +1,43 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { type FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
-import { getServerSession } from "next-auth";
+import { auth } from "@clerk/nextjs/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { db } from "~/lib/db";
-import { authOptions } from "~/lib/auth";
 
 /**
  * Context creation for tRPC
- * This runs for each request and makes the database and session available to all procedures
+ * This runs for each request and makes the database and auth available to all procedures
  */
 export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
-  // Get the session from NextAuth
-  const session = await getServerSession(authOptions);
+  // Get the auth from Clerk
+  const { userId: clerkUserId } = await auth();
+
+  // If user is authenticated, get or create their database record
+  let userId: string | null = null;
+  let organizationId: string | null = null;
+
+  if (clerkUserId) {
+    // Find or create user in our database
+    let user = await db.user.findFirst({
+      where: { id: clerkUserId },
+      include: { organization: true },
+    });
+
+    if (!user) {
+      // User doesn't exist in our DB yet - they'll be created during onboarding
+      userId = clerkUserId;
+    } else {
+      userId = user.id;
+      organizationId = user.organizationId;
+    }
+  }
 
   return {
     db,
-    session,
-    userId: session?.user?.id ?? null,
-    organizationId: session?.user?.organizationId ?? null,
+    clerkUserId,
+    userId,
+    organizationId,
     headers: opts.req.headers,
   };
 };
@@ -56,19 +75,18 @@ export const publicProcedure = t.procedure;
 
 /**
  * Protected (authenticated) procedure
- * Ensures user is authenticated before running
+ * Ensures user is authenticated via Clerk before running
  */
 export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.session?.user?.id) {
+  if (!ctx.clerkUserId) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }
 
   return next({
     ctx: {
       ...ctx,
-      session: ctx.session,
-      userId: ctx.session.user.id,
-      organizationId: ctx.session.user.organizationId ?? null,
+      userId: ctx.userId!,
+      organizationId: ctx.organizationId,
     },
   });
 });
@@ -78,11 +96,11 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
  * Ensures user is authenticated AND has an organization
  */
 export const orgProtectedProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.session?.user?.id) {
+  if (!ctx.clerkUserId) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }
 
-  if (!ctx.session.user.organizationId) {
+  if (!ctx.organizationId) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Organization required. Please complete onboarding.",
@@ -92,9 +110,8 @@ export const orgProtectedProcedure = t.procedure.use(({ ctx, next }) => {
   return next({
     ctx: {
       ...ctx,
-      session: ctx.session,
-      userId: ctx.session.user.id,
-      organizationId: ctx.session.user.organizationId,
+      userId: ctx.userId!,
+      organizationId: ctx.organizationId,
     },
   });
 });

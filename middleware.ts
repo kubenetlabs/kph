@@ -1,52 +1,41 @@
-import { withAuth } from "next-auth/middleware";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-export default withAuth(
-  function middleware(req) {
-    const { pathname } = req.nextUrl;
-    const token = req.nextauth.token;
+// Define protected routes
+const isProtectedRoute = createRouteMatcher([
+  "/dashboard(.*)",
+  "/clusters(.*)",
+  "/policies(.*)",
+  "/topology(.*)",
+  "/settings(.*)",
+  "/simulation(.*)",
+  "/validation(.*)",
+  "/marketplace(.*)",
+  "/onboarding(.*)",
+  "/api/trpc(.*)",
+]);
 
-    // If user is authenticated but has no organization, redirect to onboarding
-    // (except if they're already on onboarding page)
-    if (token && !token.organizationId && !pathname.startsWith("/onboarding")) {
-      return NextResponse.redirect(new URL("/onboarding", req.url));
-    }
+// Define public routes (accessible without auth)
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/operator(.*)",
+  "/api/auth(.*)",
+]);
 
-    // If user completed onboarding, don't let them go back
-    if (token?.organizationId && pathname.startsWith("/onboarding")) {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
-    }
-
-    return NextResponse.next();
-  },
-  {
-    callbacks: {
-      authorized: ({ token, req }) => {
-        // Allow access if user has a valid token
-        return !!token;
-      },
-    },
-    pages: {
-      signIn: "/auth/signin",
-    },
+export default clerkMiddleware(async (auth, req) => {
+  // If it's a protected route and user is not authenticated, redirect to sign-in
+  if (isProtectedRoute(req)) {
+    await auth.protect();
   }
-);
+});
 
-// Protect these routes - require authentication
 export const config = {
   matcher: [
-    // Protected dashboard routes
-    "/dashboard/:path*",
-    "/clusters/:path*",
-    "/policies/:path*",
-    "/topology/:path*",
-    "/settings/:path*",
-    "/simulation/:path*",
-    "/validation/:path*",
-    "/marketplace/:path*",
-    "/onboarding/:path*",
-    "/onboarding",
-    // Protect tRPC API routes (but not operator/auth routes)
-    "/api/trpc/:path*",
+    // Skip Next.js internals and static files
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Always run for API routes
+    "/(api|trpc)(.*)",
   ],
 };

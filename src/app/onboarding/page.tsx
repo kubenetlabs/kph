@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useUser } from "@clerk/nextjs";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Input from "~/components/ui/input";
@@ -10,7 +10,7 @@ import { trpc } from "~/lib/trpc";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { data: session, update: updateSession } = useSession();
+  const { user, isLoaded: isUserLoaded } = useUser();
 
   const [step, setStep] = useState<"welcome" | "create-org">("welcome");
   const [orgName, setOrgName] = useState("");
@@ -19,13 +19,15 @@ export default function OnboardingPage() {
   const [isCheckingSlug, setIsCheckingSlug] = useState(false);
 
   // Check onboarding status
-  const { data: status, isLoading: isLoadingStatus } = trpc.onboarding.checkStatus.useQuery();
+  const { data: status, isLoading: isLoadingStatus } = trpc.onboarding.checkStatus.useQuery(
+    undefined,
+    { enabled: isUserLoaded && !!user }
+  );
 
   // Mutations
   const createOrg = trpc.onboarding.createOrganization.useMutation({
     onSuccess: async () => {
-      // Update the session to reflect the new organization
-      await updateSession();
+      // Redirect to dashboard after org creation
       router.push("/dashboard");
     },
   });
@@ -88,7 +90,7 @@ export default function OnboardingPage() {
     setSlug(cleaned);
   };
 
-  if (isLoadingStatus) {
+  if (!isUserLoaded || isLoadingStatus) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="animate-pulse text-muted">Loading...</div>
@@ -122,7 +124,7 @@ export default function OnboardingPage() {
         {step === "welcome" && (
           <Card>
             <CardHeader className="text-center">
-              <CardTitle>Welcome, {session?.user?.name || session?.user?.email}!</CardTitle>
+              <CardTitle>Welcome, {user?.fullName || user?.primaryEmailAddress?.emailAddress}!</CardTitle>
               <CardDescription>
                 Let's get you set up with your organization
               </CardDescription>
