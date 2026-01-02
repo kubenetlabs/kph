@@ -75,6 +75,8 @@ export const topologyRouter = createTRPCRouter({
       }>();
 
       // Aggregate flows between endpoints
+      // Note: "deniedFlows" in the aggregate combines both deniedFlows and droppedFlows
+      // from the database, as Hubble marks policy-blocked traffic as DROPPED
       const flowAggregates = new Map<string, {
         srcId: string;
         dstId: string;
@@ -151,7 +153,8 @@ export const topologyRouter = createTRPCRouter({
         const agg = flowAggregates.get(edgeKey)!;
         agg.totalFlows += flow.totalFlows;
         agg.allowedFlows += flow.allowedFlows;
-        agg.deniedFlows += flow.deniedFlows;
+        // Combine deniedFlows + droppedFlows since Hubble uses DROPPED for policy blocks
+        agg.deniedFlows += flow.deniedFlows + (flow.droppedFlows ?? BigInt(0));
       }
 
       // Count workloads per namespace

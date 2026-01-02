@@ -797,8 +797,12 @@ func (r *Reconciler) GetAPIToken(ctx context.Context) (string, error) {
 	if r.config.Status.Bootstrapped {
 		return r.getClusterToken(ctx, r.config)
 	}
-	// Fall back to API token secret ref
-	return r.getAPIToken(ctx, r.config)
+	// Fall back to API token secret ref if configured
+	if r.config.Spec.APITokenSecretRef != nil && r.config.Spec.APITokenSecretRef.Name != "" {
+		return r.getAPIToken(ctx, r.config)
+	}
+	// Not bootstrapped and no API token - telemetry not available yet
+	return "", fmt.Errorf("not bootstrapped and no API token configured")
 }
 
 // GetLogger returns the reconciler's logger
