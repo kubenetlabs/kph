@@ -282,7 +282,7 @@ export const topologyRouter = createTRPCRouter({
           deniedFlows,
           unprotectedFlows,
           policyCount: 0, // Would need to join with policies
-          dataAge: flowSummaries.length > 0
+          dataAge: flowSummaries[0]
             ? Math.floor((Date.now() - flowSummaries[0].timestamp.getTime()) / 1000)
             : null,
         },
