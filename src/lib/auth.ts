@@ -19,17 +19,21 @@ export const authOptions: NextAuthOptions = {
 
   providers: [
     // Email Magic Link (P0) - uses Resend in production
-    EmailProvider({
-      server: {
-        host: process.env.EMAIL_SERVER_HOST,
-        port: Number(process.env.EMAIL_SERVER_PORT) || 587,
-        auth: {
-          user: process.env.EMAIL_SERVER_USER,
-          pass: process.env.EMAIL_SERVER_PASSWORD,
-        },
-      },
-      from: process.env.EMAIL_FROM || "noreply@policyhub.io",
-    }),
+    ...(process.env.EMAIL_SERVER_HOST && process.env.EMAIL_SERVER_PASSWORD
+      ? [
+          EmailProvider({
+            server: {
+              host: process.env.EMAIL_SERVER_HOST,
+              port: Number(process.env.EMAIL_SERVER_PORT) || 587,
+              auth: {
+                user: process.env.EMAIL_SERVER_USER,
+                pass: process.env.EMAIL_SERVER_PASSWORD,
+              },
+            },
+            from: process.env.EMAIL_FROM || "noreply@policyhub.io",
+          }),
+        ]
+      : []),
 
     // Google OAuth (P0) - enterprise SSO
     ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
