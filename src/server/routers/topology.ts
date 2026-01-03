@@ -261,38 +261,76 @@ export const topologyRouter = createTRPCRouter({
       }
 
       // Generate edges from flow aggregates
+      // Create separate edges for allowed and denied traffic when both exist
       for (const [, agg] of flowAggregates) {
         // Skip self-loops
         if (agg.srcId === agg.dstId) continue;
 
-        // Determine verdict based on flow counts
-        let verdict: "allowed" | "denied" | "no-policy" = "allowed";
-        if (agg.deniedFlows > BigInt(0) && agg.allowedFlows === BigInt(0)) {
-          verdict = "denied";
-        } else if (agg.deniedFlows > BigInt(0)) {
-          // Mixed - some allowed, some denied
-          verdict = Number(agg.deniedFlows) > Number(agg.allowedFlows) ? "denied" : "allowed";
+        const hasAllowed = agg.allowedFlows > BigInt(0);
+        const hasDenied = agg.deniedFlows > BigInt(0);
+
+        // Create allowed edge if there are allowed flows
+        if (hasAllowed) {
+          const verdict = "allowed";
+          if (!input.filters?.verdict || input.filters.verdict === "all" || input.filters.verdict === verdict) {
+            edges.push({
+              id: `edge-${agg.srcId}-${agg.dstId}-${agg.port}-allowed`,
+              source: agg.srcId,
+              target: agg.dstId,
+              type: "flow",
+              data: {
+                verdict,
+                flowCount: Number(agg.allowedFlows),
+                allowedCount: Number(agg.allowedFlows),
+                deniedCount: 0,
+                protocol: agg.protocol,
+                port: agg.port,
+              },
+            });
+          }
         }
 
-        // Apply verdict filter
-        if (input.filters?.verdict && input.filters.verdict !== "all") {
-          if (input.filters.verdict !== verdict) continue;
+        // Create denied edge if there are denied/dropped flows
+        if (hasDenied) {
+          const verdict = "denied";
+          if (!input.filters?.verdict || input.filters.verdict === "all" || input.filters.verdict === verdict) {
+            edges.push({
+              id: `edge-${agg.srcId}-${agg.dstId}-${agg.port}-denied`,
+              source: agg.srcId,
+              target: agg.dstId,
+              type: "flow",
+              data: {
+                verdict,
+                flowCount: Number(agg.deniedFlows),
+                allowedCount: 0,
+                deniedCount: Number(agg.deniedFlows),
+                protocol: agg.protocol,
+                port: agg.port,
+              },
+            });
+          }
         }
 
-        edges.push({
-          id: `edge-${agg.srcId}-${agg.dstId}-${agg.port}`,
-          source: agg.srcId,
-          target: agg.dstId,
-          type: "flow",
-          data: {
-            verdict,
-            flowCount: Number(agg.totalFlows),
-            allowedCount: Number(agg.allowedFlows),
-            deniedCount: Number(agg.deniedFlows),
-            protocol: agg.protocol,
-            port: agg.port,
-          },
-        });
+        // If neither allowed nor denied, it's no-policy (shouldn't happen often)
+        if (!hasAllowed && !hasDenied) {
+          const verdict = "no-policy";
+          if (!input.filters?.verdict || input.filters.verdict === "all" || input.filters.verdict === verdict) {
+            edges.push({
+              id: `edge-${agg.srcId}-${agg.dstId}-${agg.port}`,
+              source: agg.srcId,
+              target: agg.dstId,
+              type: "flow",
+              data: {
+                verdict,
+                flowCount: Number(agg.totalFlows),
+                allowedCount: 0,
+                deniedCount: 0,
+                protocol: agg.protocol,
+                port: agg.port,
+              },
+            });
+          }
+        }
       }
 
       // Calculate summary stats
