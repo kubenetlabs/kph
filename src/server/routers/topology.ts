@@ -338,16 +338,6 @@ export const topologyRouter = createTRPCRouter({
       const deniedFlows = edges.filter((e) => e.data.verdict === "denied").length;
       const unprotectedFlows = edges.filter((e) => e.data.verdict === "no-policy").length;
 
-      // Debug: log query results
-      console.log("[topology] Query results:", {
-        recentFlowsCount: recentFlows.length,
-        policyBlockedFlowsCount: policyBlockedFlows.length,
-        mergedFlowsCount: flowSummaries.length,
-        edgesCount: edges.length,
-        deniedEdgesCount: deniedFlows,
-        droppedFlowsInData: policyBlockedFlows.filter(f => f.droppedFlows > 0n).length,
-      });
-
       return {
         nodes,
         edges,
