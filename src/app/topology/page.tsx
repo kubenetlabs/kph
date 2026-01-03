@@ -178,7 +178,7 @@ export default function TopologyPage() {
                 {topologyData.summary.allowedFlows} allowed
               </span>
               {topologyData.summary.deniedFlows > 0 && (
-                <Badge variant="destructive">
+                <Badge variant="danger">
                   {topologyData.summary.deniedFlows} denied
                 </Badge>
               )}
