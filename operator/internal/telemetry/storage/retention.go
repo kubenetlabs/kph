@@ -13,11 +13,12 @@ import (
 
 // RetentionWorker handles cleanup of old telemetry data.
 type RetentionWorker struct {
-	basePath      string
-	retentionDays int
-	maxStorageGB  int64
-	index         *SQLiteIndex
-	log           logr.Logger
+	basePath       string
+	retentionDays  int
+	maxStorageGB   int64
+	maxSQLiteSizeGB int64
+	index          *SQLiteIndex
+	log            logr.Logger
 
 	// Cleanup interval
 	cleanupInterval time.Duration
@@ -31,6 +32,9 @@ type RetentionWorkerConfig struct {
 	RetentionDays int
 	// MaxStorageGB is the maximum storage in GB (default: 100)
 	MaxStorageGB int64
+	// MaxSQLiteSizeGB is the maximum SQLite database size in GB (default: 2)
+	// When exceeded, oldest events are aggressively pruned regardless of retention policy
+	MaxSQLiteSizeGB int64
 	// Index is the SQLite index for metadata management
 	Index *SQLiteIndex
 	// CleanupInterval is how often to run cleanup (default: 1 hour)
@@ -51,6 +55,11 @@ func NewRetentionWorker(cfg RetentionWorkerConfig) *RetentionWorker {
 		maxStorageGB = 100
 	}
 
+	maxSQLiteSizeGB := cfg.MaxSQLiteSizeGB
+	if maxSQLiteSizeGB <= 0 {
+		maxSQLiteSizeGB = 2 // Default 2GB max for SQLite
+	}
+
 	cleanupInterval := cfg.CleanupInterval
 	if cleanupInterval <= 0 {
 		cleanupInterval = time.Hour
@@ -60,6 +69,7 @@ func NewRetentionWorker(cfg RetentionWorkerConfig) *RetentionWorker {
 		basePath:        cfg.BasePath,
 		retentionDays:   retentionDays,
 		maxStorageGB:    maxStorageGB,
+		maxSQLiteSizeGB: maxSQLiteSizeGB,
 		index:           cfg.Index,
 		log:             cfg.Logger.WithName("retention-worker"),
 		cleanupInterval: cleanupInterval,
@@ -71,6 +81,7 @@ func (rw *RetentionWorker) Start(ctx context.Context) {
 	rw.log.Info("Starting retention worker",
 		"retentionDays", rw.retentionDays,
 		"maxStorageGB", rw.maxStorageGB,
+		"maxSQLiteSizeGB", rw.maxSQLiteSizeGB,
 		"interval", rw.cleanupInterval,
 	)
 
@@ -104,7 +115,14 @@ func (rw *RetentionWorker) RunCleanup(ctx context.Context) error {
 		dbSize, _ := rw.index.GetDatabaseSize()
 		rw.log.Info("Pre-cleanup storage status",
 			"sqliteDBSizeGB", float64(dbSize)/(1024*1024*1024),
+			"maxSQLiteSizeGB", rw.maxSQLiteSizeGB,
 		)
+	}
+
+	// 0. CRITICAL: Enforce SQLite size limit FIRST - this prevents disk pressure
+	// This aggressively prunes events if SQLite exceeds max size, regardless of retention policy
+	if err := rw.enforceSQLiteSizeLimit(ctx); err != nil {
+		rw.log.Error(err, "Failed to enforce SQLite size limit")
 	}
 
 	// 1. Delete data older than retention period (includes SQLite event cleanup)
@@ -182,6 +200,93 @@ func (rw *RetentionWorker) safeVacuum(ctx context.Context) error {
 		"newSizeGB", float64(newSize)/(1024*1024*1024),
 		"reclaimedGB", float64(dbSize-newSize)/(1024*1024*1024),
 	)
+
+	return nil
+}
+
+// enforceSQLiteSizeLimit aggressively prunes oldest events when SQLite exceeds max size.
+// This is critical to prevent disk pressure - it runs BEFORE regular retention cleanup.
+func (rw *RetentionWorker) enforceSQLiteSizeLimit(ctx context.Context) error {
+	if rw.index == nil {
+		return nil
+	}
+
+	dbSize, err := rw.index.GetDatabaseSize()
+	if err != nil {
+		return fmt.Errorf("failed to get database size: %w", err)
+	}
+
+	maxBytes := rw.maxSQLiteSizeGB * 1024 * 1024 * 1024
+	if dbSize <= maxBytes {
+		return nil // Under limit, nothing to do
+	}
+
+	rw.log.Info("SQLite database exceeds size limit, starting aggressive cleanup",
+		"currentSizeGB", float64(dbSize)/(1024*1024*1024),
+		"maxSizeGB", rw.maxSQLiteSizeGB,
+	)
+
+	// Calculate how much we need to delete (aim for 50% of max to give headroom)
+	targetSize := maxBytes / 2
+
+	// Delete events in batches until we're under target
+	batchSize := int64(100000) // Delete 100k events at a time
+	totalDeleted := int64(0)
+	iterations := 0
+	maxIterations := 100 // Safety limit
+
+	for iterations < maxIterations {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		// Get current size
+		currentSize, err := rw.index.GetDatabaseSize()
+		if err != nil {
+			return fmt.Errorf("failed to get database size: %w", err)
+		}
+
+		if currentSize <= targetSize {
+			break // Target reached
+		}
+
+		// Delete oldest batch of events
+		deleted, err := rw.index.DeleteOldestEvents(ctx, batchSize)
+		if err != nil {
+			return fmt.Errorf("failed to delete events: %w", err)
+		}
+
+		if deleted == 0 {
+			break // No more events to delete
+		}
+
+		totalDeleted += deleted
+		iterations++
+
+		// Checkpoint periodically to reclaim space
+		if iterations%5 == 0 {
+			if err := rw.index.Checkpoint(); err != nil {
+				rw.log.Error(err, "Failed to checkpoint during aggressive cleanup")
+			}
+		}
+	}
+
+	// Final checkpoint
+	if totalDeleted > 0 {
+		if err := rw.index.Checkpoint(); err != nil {
+			rw.log.Error(err, "Failed to checkpoint after aggressive cleanup")
+		}
+
+		newSize, _ := rw.index.GetDatabaseSize()
+		rw.log.Info("Aggressive SQLite cleanup completed",
+			"deletedEvents", totalDeleted,
+			"iterations", iterations,
+			"oldSizeGB", float64(dbSize)/(1024*1024*1024),
+			"newSizeGB", float64(newSize)/(1024*1024*1024),
+		)
+	}
 
 	return nil
 }

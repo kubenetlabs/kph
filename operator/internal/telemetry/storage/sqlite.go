@@ -570,6 +570,26 @@ func (idx *SQLiteIndex) DeleteHourlyStatsOlderThan(ctx context.Context, cutoffHo
 	return deleted, nil
 }
 
+// DeleteOldestEvents deletes the oldest N events from the index.
+// This is used for aggressive cleanup when the database exceeds size limits.
+func (idx *SQLiteIndex) DeleteOldestEvents(ctx context.Context, limit int64) (int64, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Delete oldest events by timestamp
+	result, err := idx.db.ExecContext(ctx, `
+		DELETE FROM event_index WHERE id IN (
+			SELECT id FROM event_index ORDER BY timestamp ASC LIMIT ?
+		)
+	`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete oldest events: %w", err)
+	}
+
+	deleted, _ := result.RowsAffected()
+	return deleted, nil
+}
+
 // GetDatabaseSize returns the total size of the SQLite database files in bytes.
 func (idx *SQLiteIndex) GetDatabaseSize() (int64, error) {
 	idx.mu.RLock()

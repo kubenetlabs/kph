@@ -24,6 +24,10 @@ type Manager struct {
 	retention *RetentionWorker
 	reader    *ParquetReader
 
+	// Sampling configuration
+	indexSampleRate int   // 1-100, percentage of events to index
+	sampleCounter   int64 // Counter for sampling
+
 	// State
 	mu      sync.RWMutex
 	started bool
@@ -39,6 +43,11 @@ type ManagerConfig struct {
 	RetentionDays int
 	// MaxStorageGB is the maximum storage in GB
 	MaxStorageGB int64
+	// MaxSQLiteSizeGB is the maximum SQLite database size in GB (default: 2)
+	MaxSQLiteSizeGB int64
+	// IndexSampleRate controls what fraction of events are indexed (1-100, default: 10 = 10%)
+	// Lower values reduce SQLite growth but affect query accuracy
+	IndexSampleRate int
 	// Logger for logging
 	Logger logr.Logger
 }
@@ -93,21 +102,32 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 
 	// Initialize retention worker
 	retention := NewRetentionWorker(RetentionWorkerConfig{
-		BasePath:      parquetPath,
-		RetentionDays: cfg.RetentionDays,
-		MaxStorageGB:  cfg.MaxStorageGB,
-		Index:         index,
-		Logger:        cfg.Logger,
+		BasePath:        parquetPath,
+		RetentionDays:   cfg.RetentionDays,
+		MaxStorageGB:    cfg.MaxStorageGB,
+		MaxSQLiteSizeGB: cfg.MaxSQLiteSizeGB,
+		Index:           index,
+		Logger:          cfg.Logger,
 	})
 
+	// Set default sample rate (10% of events indexed)
+	sampleRate := cfg.IndexSampleRate
+	if sampleRate <= 0 {
+		sampleRate = 10
+	}
+	if sampleRate > 100 {
+		sampleRate = 100
+	}
+
 	return &Manager{
-		basePath:  cfg.BasePath,
-		nodeName:  cfg.NodeName,
-		log:       log,
-		writer:    writer,
-		index:     index,
-		retention: retention,
-		reader:    reader,
+		basePath:        cfg.BasePath,
+		nodeName:        cfg.NodeName,
+		log:             log,
+		writer:          writer,
+		index:           index,
+		retention:       retention,
+		reader:          reader,
+		indexSampleRate: sampleRate,
 	}, nil
 }
 
@@ -138,28 +158,36 @@ func (m *Manager) Write(events []*models.TelemetryEvent) error {
 	// Get current file info before write
 	stats := m.writer.GetStats()
 
-	// Write to Parquet
+	// Write to Parquet (all events)
 	if err := m.writer.Write(events); err != nil {
 		return fmt.Errorf("failed to write to Parquet: %w", err)
 	}
 
-	// Index the events
-	newStats := m.writer.GetStats()
-	parquetFile := filepath.Join(m.basePath, "parquet", newStats.CurrentDate,
-		fmt.Sprintf("events_%s_*.parquet", m.nodeName))
+	// Sample events for indexing to reduce SQLite growth
+	sampledEvents := m.sampleEventsForIndex(events)
 
-	if err := m.index.IndexEvents(events, parquetFile); err != nil {
-		m.log.Error(err, "Failed to index events")
-		// Continue even if indexing fails - data is still in Parquet
+	// Index only sampled events
+	if len(sampledEvents) > 0 {
+		newStats := m.writer.GetStats()
+		parquetFile := filepath.Join(m.basePath, "parquet", newStats.CurrentDate,
+			fmt.Sprintf("events_%s_*.parquet", m.nodeName))
+
+		if err := m.index.IndexEvents(sampledEvents, parquetFile); err != nil {
+			m.log.Error(err, "Failed to index events")
+			// Continue even if indexing fails - data is still in Parquet
+		}
 	}
 
-	// Update hourly stats
+	// Update hourly stats (for ALL events - these are aggregates so size is bounded)
 	if err := m.index.UpdateHourlyStats(events); err != nil {
 		m.log.Error(err, "Failed to update hourly stats")
 	}
 
+	newStats := m.writer.GetStats()
 	m.log.V(1).Info("Stored events",
 		"count", len(events),
+		"indexed", len(sampledEvents),
+		"sampleRate", m.indexSampleRate,
 		"date", newStats.CurrentDate,
 		"totalEvents", newStats.EventCount,
 	)
@@ -171,6 +199,32 @@ func (m *Manager) Write(events []*models.TelemetryEvent) error {
 	}
 
 	return nil
+}
+
+// sampleEventsForIndex returns a subset of events for indexing based on sample rate.
+// This reduces SQLite growth while maintaining query capability.
+func (m *Manager) sampleEventsForIndex(events []*models.TelemetryEvent) []*models.TelemetryEvent {
+	if m.indexSampleRate >= 100 {
+		return events // No sampling, index everything
+	}
+
+	// Use deterministic sampling based on counter
+	m.mu.Lock()
+	startCounter := m.sampleCounter
+	m.sampleCounter += int64(len(events))
+	m.mu.Unlock()
+
+	sampled := make([]*models.TelemetryEvent, 0, len(events)*m.indexSampleRate/100+1)
+
+	for i, event := range events {
+		// Sample every Nth event (e.g., 10% = every 10th event)
+		eventNum := startCounter + int64(i)
+		if eventNum%(100/int64(m.indexSampleRate)) == 0 {
+			sampled = append(sampled, event)
+		}
+	}
+
+	return sampled
 }
 
 // registerCompletedFile registers a completed Parquet file in the index.
