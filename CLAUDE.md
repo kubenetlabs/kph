@@ -44,7 +44,7 @@ policy-hub-starter/
 - **Framework**: Next.js 14 with App Router
 - **API Layer**: tRPC for type-safe APIs
 - **Database**: PostgreSQL with Prisma ORM
-- **Auth**: NextAuth.js with GitHub OAuth
+- **Auth**: Clerk (`@clerk/nextjs`) with OAuth + Email
 - **UI**: React 18, Tailwind CSS, shadcn/ui components
 - **State**: TanStack Query (React Query)
 - **Validation**: Zod schemas
@@ -140,19 +140,26 @@ Cilium returns labels with prefixes (`k8s:app=nginx`), but policy YAML uses bare
 - [x] Hubble flow collection and normalization
 - [x] Tetragon process event collection
 - [x] Parquet storage with daily partitions
-- [x] SQLite indexing for fast queries
-- [x] 7-day retention cleanup
+- [x] SQLite indexing for fast queries (with sampling to limit growth)
+- [x] 7-day retention cleanup + SQLite size limits (2GB max)
 - [x] Policy simulation engine
 - [x] Label prefix normalization (k8s:, reserved:, container:)
 - [x] Skip-file mechanism for concurrent read/write safety
+- [x] SaaS aggregate ingestion endpoints (`/api/operator/telemetry/aggregates`)
+- [x] Validation agent with policy matching
+- [x] Validation summary ingestion (`/api/operator/validation`)
+- [x] Time-travel simulation UI
+- [x] Policy Topology Map (React Flow with @xyflow/react)
+- [x] Authentication (Clerk with OAuth + Email)
+- [x] Multi-tenancy (Organization-based data isolation)
+- [x] Onboarding flow
 
 ### In Progress
-- [ ] SaaS aggregate ingestion endpoints
-- [ ] Simulation UI in dashboard
-- [ ] Policy deployment workflow
+- [ ] Policy deployment workflow (deploy from SaaS UI to cluster)
 
 ### Planned
-- [ ] gRPC query API for on-demand simulation
+- [ ] Gateway API CRUD support (HTTPRoute, GRPCRoute, TCPRoute, TLSRoute)
+- [ ] Policy Pack Marketplace
 - [ ] Multi-cluster policy sync
 - [ ] Policy recommendations from traffic analysis
 
@@ -831,18 +838,23 @@ Until these gates are met, intelligence remains human-in-the-loop.
 
 Work in this order:
 
-1. **Finish core KPH first**
-   - SaaS aggregate ingestion endpoints
-   - Simulation UI in dashboard  
-   - Policy deployment workflow
+1. **Core KPH** ✅ DONE
+   - SaaS aggregate ingestion endpoints ✅
+   - Simulation UI in dashboard ✅
+   - Validation agent ✅
+   - Topology map ✅
+   - Authentication (Clerk) ✅
 
-2. **Then Validation Agent**
-   - `validation/` package in operator
-   - Policy matcher
-   - ValidationSummary ingestion
-   - Validation dashboard UI
+2. **Policy Deployment Workflow** ← CURRENT
+   - Deploy policies from SaaS UI to cluster
+   - Operator endpoint to receive and apply policies
+   - Deployment status tracking
 
-3. **Then Marketplace**
+3. **Gateway API Support**
+   - HTTPRoute, GRPCRoute, TCPRoute, TLSRoute CRUD
+   - Gateway API in topology visualization
+
+4. **Then Marketplace**
    - Schema + seed data
    - Browser UI
    - Installation flow
@@ -1346,28 +1358,27 @@ These features are required for V1 launch alongside the existing policy CRUD, si
 
 ---
 
-### Authentication
+### Authentication ✅ IMPLEMENTED
 
-KPH uses Vercel-native authentication for the SaaS deployment. Authentication is required for all routes except the marketing landing page.
+KPH uses Clerk for authentication. Authentication is required for all routes except the marketing landing page and operator API endpoints.
 
-#### Auth Provider: NextAuth.js
+#### Auth Provider: Clerk
 
-NextAuth.js is the standard authentication solution for Next.js applications deployed on Vercel.
+Clerk (`@clerk/nextjs`) provides a complete authentication solution with built-in UI components.
 
 ```
 Dependencies:
-- next-auth
-- @auth/prisma-adapter (for database sessions)
+- @clerk/nextjs
 ```
 
 #### Supported Auth Methods
 
-| Method | Priority | Implementation |
-|--------|----------|----------------|
-| Email Magic Link | P0 | Passwordless email login via Resend or SendGrid |
-| Google OAuth | P0 | Google Workspace SSO for enterprise users |
-| GitHub OAuth | P1 | Developer-friendly option |
-| SAML SSO | P2 | Enterprise SSO (Okta, Azure AD) — V1.1 |
+| Method | Status | Implementation |
+|--------|--------|----------------|
+| Email + Password | ✅ | Standard email/password login |
+| Google OAuth | ✅ | Google Workspace SSO |
+| GitHub OAuth | ✅ | Developer-friendly option |
+| SAML SSO | Planned | Enterprise SSO (Okta, Azure AD) — V1.1 |
 
 #### Auth Data Model
 
@@ -1995,16 +2006,16 @@ interface SimulateGatewayAPIRequest {
 
 ### V1 Feature Summary
 
-| Feature | Scope | Effort | Dependencies |
-|---------|-------|--------|--------------|
-| **Authentication** | NextAuth.js + OAuth + Magic Link | 1 week | Vercel, Resend/SendGrid |
-| **Organization Model** | Multi-tenant data isolation | Included in auth | Prisma schema update |
-| **Policy Topology Map** | Live view + simulation mode | 3-4 weeks | React Flow, Hubble data |
-| **Gateway API CRUD** | HTTPRoute, GRPCRoute, TCPRoute, TLSRoute | 2 weeks | Cilium Gateway API |
-| **Gateway API in Topology** | Visualize routes as graph layer | 1 week | Topology map |
-| **Gateway API Validation** | Route attachment, backend validation | 1 week | Validation agent |
-
-**Total V1 Addition: 8-10 weeks**
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Authentication** | ✅ Done | Clerk with OAuth + Email |
+| **Organization Model** | ✅ Done | Multi-tenant data isolation |
+| **Policy Topology Map** | ✅ Done | React Flow (@xyflow/react) |
+| **Validation Agent** | ✅ Done | Policy matching + verdict reporting |
+| **Time-Travel Simulation** | ✅ Done | Historical flow analysis |
+| **Policy Deployment Workflow** | 🔄 In Progress | Deploy from UI to cluster |
+| **Gateway API CRUD** | ❌ Planned | HTTPRoute, GRPCRoute, TCPRoute, TLSRoute |
+| **Gateway API in Topology** | ❌ Planned | Visualize routes as graph layer |
 
 ---
 
