@@ -86,6 +86,29 @@ export async function PATCH(
       },
     });
 
+    // Update the most recent PENDING PolicyDeployment for this policy
+    const pendingDeployment = await db.policyDeployment.findFirst({
+      where: {
+        policyId: policyId,
+        status: "PENDING",
+      },
+      orderBy: { requestedAt: "desc" },
+    });
+
+    if (pendingDeployment) {
+      const deploymentStatus = status === "DEPLOYED" ? "SUCCEEDED" : "FAILED";
+      await db.policyDeployment.update({
+        where: { id: pendingDeployment.id },
+        data: {
+          status: deploymentStatus,
+          completedAt: new Date(),
+          errorMessage: error ?? null,
+          resourceName: deployedResources?.[0]?.name ?? null,
+          resourceNamespace: deployedResources?.[0]?.namespace ?? null,
+        },
+      });
+    }
+
     // Create audit log entry
     await db.auditLog.create({
       data: {
