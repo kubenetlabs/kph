@@ -698,3 +698,93 @@ func (c *Client) SubmitAggregates(ctx context.Context, aggregates *AggregatedTel
 
 	return &result, nil
 }
+
+// GatewayAPIResource represents a Gateway API resource from the SaaS platform
+type GatewayAPIResource struct {
+	ID          string                 `json:"id"`
+	Kind        string                 `json:"kind"`
+	Name        string                 `json:"name"`
+	Namespace   string                 `json:"namespace"`
+	YAML        string                 `json:"yaml"`
+	ParentRefs  []map[string]any       `json:"parentRefs,omitempty"`
+	Hostnames   []string               `json:"hostnames,omitempty"`
+	Rules       []map[string]any       `json:"rules,omitempty"`
+	Status      string                 `json:"status"`
+	SyncedAt    string                 `json:"syncedAt,omitempty"`
+	LastUpdated string                 `json:"lastUpdated"`
+}
+
+// FetchGatewayAPIResponse is the response from fetching Gateway API resources
+type FetchGatewayAPIResponse struct {
+	Success   bool                 `json:"success"`
+	Resources []GatewayAPIResource `json:"resources"`
+	Count     int                  `json:"count"`
+	Error     string               `json:"error,omitempty"`
+}
+
+// FetchGatewayAPIResources retrieves all Gateway API resources for this cluster
+func (c *Client) FetchGatewayAPIResources(ctx context.Context) (*FetchGatewayAPIResponse, error) {
+	resp, err := c.doRequest(ctx, "GET", "/api/operator/gateway-api", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Gateway API resources: %w", err)
+	}
+
+	var result FetchGatewayAPIResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Gateway API response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("fetch Gateway API resources failed: %s", result.Error)
+	}
+
+	c.log.V(1).Info("Fetched Gateway API resources from SaaS platform", "count", result.Count)
+
+	return &result, nil
+}
+
+// UpdateGatewayAPIStatusRequest is the request body for updating Gateway API resource status
+type UpdateGatewayAPIStatusRequest struct {
+	Status string `json:"status"` // DEPLOYED or FAILED
+	Error  string `json:"error,omitempty"`
+}
+
+// UpdateGatewayAPIStatusResponse is the response from updating Gateway API resource status
+type UpdateGatewayAPIStatusResponse struct {
+	Success    bool   `json:"success"`
+	ResourceID string `json:"resourceId"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+}
+
+// UpdateGatewayAPIStatus updates the deployment status of a Gateway API resource
+func (c *Client) UpdateGatewayAPIStatus(ctx context.Context, resourceID string, req UpdateGatewayAPIStatusRequest) (*UpdateGatewayAPIStatusResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal status update request: %w", err)
+	}
+
+	path := fmt.Sprintf("/api/operator/gateway-api/%s/status", resourceID)
+	resp, err := c.doRequest(ctx, "PATCH", path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update Gateway API resource status: %w", err)
+	}
+
+	var result UpdateGatewayAPIStatusResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal status update response: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("status update failed: %s", result.Error)
+	}
+
+	c.log.V(1).Info("Updated Gateway API resource status",
+		"resourceId", resourceID,
+		"kind", result.Kind,
+		"status", req.Status)
+
+	return &result, nil
+}

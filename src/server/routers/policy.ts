@@ -13,6 +13,7 @@ const PolicyTypeSchema = z.enum([
   "GATEWAY_HTTPROUTE",
   "GATEWAY_GRPCROUTE",
   "GATEWAY_TCPROUTE",
+  "GATEWAY_TLSROUTE",
 ]);
 
 const PolicyStatusSchema = z.enum([

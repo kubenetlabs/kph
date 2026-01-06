@@ -545,6 +545,141 @@ func (r *Reconciler) ReconcilePolicy(ctx context.Context, mp *policyv1alpha1.Man
 	return nil
 }
 
+// SyncGatewayAPIResources synchronizes Gateway API resources from the SaaS platform
+func (r *Reconciler) SyncGatewayAPIResources(ctx context.Context) error {
+	r.log.V(1).Info("Starting Gateway API resource sync")
+
+	// Fetch Gateway API resources from SaaS
+	resp, err := r.saasClient.FetchGatewayAPIResources(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch Gateway API resources: %w", err)
+	}
+
+	if resp.Count == 0 {
+		r.log.V(1).Info("No Gateway API resources to sync")
+		return nil
+	}
+
+	r.log.Info("Fetched Gateway API resources from SaaS", "count", resp.Count)
+
+	// Get existing ManagedPolicies for Gateway API types
+	existingPolicies := &policyv1alpha1.ManagedPolicyList{}
+	if err := r.client.List(ctx, existingPolicies, client.InNamespace(r.config.Namespace)); err != nil {
+		return fmt.Errorf("failed to list existing policies: %w", err)
+	}
+
+	// Build map of existing Gateway API policies by policy ID
+	existingByID := make(map[string]*policyv1alpha1.ManagedPolicy)
+	for i := range existingPolicies.Items {
+		p := &existingPolicies.Items[i]
+		// Only track Gateway API types
+		switch p.Spec.PolicyType {
+		case policyv1alpha1.PolicyTypeGatewayHTTPRoute,
+			policyv1alpha1.PolicyTypeGatewayGRPCRoute,
+			policyv1alpha1.PolicyTypeGatewayTCPRoute,
+			policyv1alpha1.PolicyTypeGatewayTLSRoute:
+			existingByID[p.Spec.PolicyID] = p
+		}
+	}
+
+	// Process each Gateway API resource from SaaS
+	saasIDs := make(map[string]bool)
+	for _, resource := range resp.Resources {
+		saasIDs[resource.ID] = true
+
+		// Map kind to PolicyType
+		policyType := gatewayKindToPolicyType(resource.Kind)
+		if policyType == "" {
+			r.log.Info("Skipping unsupported Gateway API kind", "kind", resource.Kind)
+			continue
+		}
+
+		existing, found := existingByID[resource.ID]
+		if found {
+			// Check if update needed (using name as version proxy since Gateway API doesn't have versions)
+			if existing.Spec.Content != resource.YAML {
+				r.log.Info("Updating Gateway API resource",
+					"kind", resource.Kind,
+					"name", resource.Name,
+					"namespace", resource.Namespace)
+
+				existing.Spec.Content = resource.YAML
+				existing.Spec.TargetNamespaces = []string{resource.Namespace}
+				existing.Spec.Version = existing.Spec.Version + 1 // Increment version on update
+
+				if err := r.client.Update(ctx, existing); err != nil {
+					r.log.Error(err, "Failed to update ManagedPolicy", "name", existing.Name)
+					continue
+				}
+			}
+		} else {
+			// Create new ManagedPolicy
+			r.log.Info("Creating new Gateway API policy",
+				"kind", resource.Kind,
+				"name", resource.Name,
+				"namespace", resource.Namespace)
+
+			mp := &policyv1alpha1.ManagedPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sanitizeName(fmt.Sprintf("gw-%s-%s-%s", resource.Kind, resource.Namespace, resource.Name)),
+					Namespace: r.config.Namespace,
+				},
+				Spec: policyv1alpha1.ManagedPolicySpec{
+					PolicyID:         resource.ID,
+					Name:             resource.Name,
+					Description:      fmt.Sprintf("%s in namespace %s", resource.Kind, resource.Namespace),
+					PolicyType:       policyType,
+					Content:          resource.YAML,
+					TargetNamespaces: []string{resource.Namespace},
+					Version:          1,
+				},
+			}
+
+			if err := r.client.Create(ctx, mp); err != nil {
+				r.log.Error(err, "Failed to create ManagedPolicy",
+					"kind", resource.Kind,
+					"name", resource.Name)
+				continue
+			}
+		}
+	}
+
+	// Delete Gateway API policies that no longer exist in SaaS
+	for id, existing := range existingByID {
+		if !saasIDs[id] {
+			r.log.Info("Deleting removed Gateway API resource", "name", existing.Name)
+
+			// Delete deployed resources first
+			if err := r.deployer.Delete(ctx, existing); err != nil {
+				r.log.Error(err, "Failed to delete Gateway API resource", "name", existing.Name)
+			}
+
+			// Delete the ManagedPolicy
+			if err := r.client.Delete(ctx, existing); err != nil {
+				r.log.Error(err, "Failed to delete ManagedPolicy", "name", existing.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// gatewayKindToPolicyType maps Gateway API kind to PolicyType enum
+func gatewayKindToPolicyType(kind string) policyv1alpha1.PolicyType {
+	switch kind {
+	case "HTTPRoute":
+		return policyv1alpha1.PolicyTypeGatewayHTTPRoute
+	case "GRPCRoute":
+		return policyv1alpha1.PolicyTypeGatewayGRPCRoute
+	case "TCPRoute":
+		return policyv1alpha1.PolicyTypeGatewayTCPRoute
+	case "TLSRoute":
+		return policyv1alpha1.PolicyTypeGatewayTLSRoute
+	default:
+		return ""
+	}
+}
+
 // SendHeartbeat sends a heartbeat to the SaaS platform
 func (r *Reconciler) SendHeartbeat(ctx context.Context) error {
 	// Get cluster info

@@ -5,7 +5,7 @@ import (
 )
 
 // PolicyType defines the type of policy being managed
-// +kubebuilder:validation:Enum=CILIUM_NETWORK;CILIUM_CLUSTERWIDE;TETRAGON;GATEWAY_HTTPROUTE;GATEWAY_GRPCROUTE;GATEWAY_TCPROUTE
+// +kubebuilder:validation:Enum=CILIUM_NETWORK;CILIUM_CLUSTERWIDE;TETRAGON;GATEWAY_HTTPROUTE;GATEWAY_GRPCROUTE;GATEWAY_TCPROUTE;GATEWAY_TLSROUTE
 type PolicyType string
 
 const (
@@ -15,6 +15,7 @@ const (
 	PolicyTypeGatewayHTTPRoute  PolicyType = "GATEWAY_HTTPROUTE"
 	PolicyTypeGatewayGRPCRoute  PolicyType = "GATEWAY_GRPCROUTE"
 	PolicyTypeGatewayTCPRoute   PolicyType = "GATEWAY_TCPROUTE"
+	PolicyTypeGatewayTLSRoute   PolicyType = "GATEWAY_TLSROUTE"
 )
 
 // ManagedPolicySpec defines the desired state of ManagedPolicy

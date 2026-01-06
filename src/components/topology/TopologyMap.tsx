@@ -19,7 +19,9 @@ import "@xyflow/react/dist/style.css";
 import { WorkloadNode } from "./nodes/WorkloadNode";
 import { NamespaceNode } from "./nodes/NamespaceNode";
 import { ExternalNode } from "./nodes/ExternalNode";
+import { GatewayNode } from "./nodes/GatewayNode";
 import { FlowEdge } from "./edges/FlowEdge";
+import { GatewayEdge } from "./edges/GatewayEdge";
 import { useTopologyStore } from "~/stores/topology-store";
 
 // Register custom node types
@@ -27,11 +29,13 @@ const nodeTypes = {
   workload: WorkloadNode,
   namespace: NamespaceNode,
   external: ExternalNode,
+  gateway: GatewayNode,
 };
 
 // Register custom edge types
 const edgeTypes = {
   flow: FlowEdge,
+  gateway: GatewayEdge,
 };
 
 export type TopologyMapProps = {
@@ -122,6 +126,8 @@ export function TopologyMap({
                 return "#6b7280";
               case "external":
                 return "#8b5cf6";
+              case "gateway":
+                return "#0ea5e9";
               default:
                 return "#6b7280";
             }
