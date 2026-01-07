@@ -588,13 +588,13 @@ export const gatewayApiRouter = createTRPCRouter({
         let warnings: string[] = [];
 
         try {
-          if (errorsStr) errors = JSON.parse(errorsStr);
+          if (errorsStr) errors = JSON.parse(errorsStr) as string[];
         } catch {
           // ignore parse errors
         }
 
         try {
-          if (warningsStr) warnings = JSON.parse(warningsStr);
+          if (warningsStr) warnings = JSON.parse(warningsStr) as string[];
         } catch {
           // ignore parse errors
         }

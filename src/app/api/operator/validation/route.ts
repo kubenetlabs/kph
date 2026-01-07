@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Process Gateway API validation results
-    if (gatewayValidation && gatewayValidation.results) {
+    if (gatewayValidation?.results) {
       for (const routeResult of gatewayValidation.results) {
         // Update the GatewayAPIPolicy with validation results
         // Find by name/namespace/kind in this cluster
