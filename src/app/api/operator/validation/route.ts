@@ -54,10 +54,32 @@ const ValidationEventSchema = z.object({
   reason: z.string().optional(),
 });
 
+// Schema for Gateway API route validation result
+const GatewayRouteValidationSchema = z.object({
+  kind: z.string(),
+  name: z.string(),
+  namespace: z.string(),
+  valid: z.boolean(),
+  errors: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
+  validatedAt: z.string().datetime(),
+});
+
+// Schema for Gateway API validation payload
+const GatewayValidationSchema = z.object({
+  timestamp: z.string().datetime(),
+  totalRoutes: z.number().int().min(0),
+  validRoutes: z.number().int().min(0),
+  invalidRoutes: z.number().int().min(0),
+  totalGateways: z.number().int().min(0),
+  results: z.array(GatewayRouteValidationSchema).optional(),
+});
+
 // Schema for the full ingestion request
 const ValidationIngestionSchema = z.object({
   summaries: z.array(ValidationSummarySchema).optional(),
   events: z.array(ValidationEventSchema).max(1000).optional(),
+  gatewayValidation: GatewayValidationSchema.optional(),
 });
 
 /**
@@ -95,9 +117,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { summaries, events } = parseResult.data;
+    const { summaries, events, gatewayValidation } = parseResult.data;
     let summariesUpserted = 0;
     let eventsCreated = 0;
+    let gatewayRoutesValidated = 0;
 
     // Upsert validation summaries
     if (summaries && summaries.length > 0) {
@@ -155,10 +178,45 @@ export async function POST(request: NextRequest) {
       eventsCreated = result.count;
     }
 
+    // Process Gateway API validation results
+    if (gatewayValidation && gatewayValidation.results) {
+      for (const routeResult of gatewayValidation.results) {
+        // Update the GatewayAPIPolicy with validation results
+        // Find by name/namespace/kind in this cluster
+        const gatewayPolicy = await db.gatewayAPIPolicy.findFirst({
+          where: {
+            cluster: { id: auth.clusterId },
+            name: routeResult.name,
+            namespace: routeResult.namespace,
+            kind: routeResult.kind as "HTTPRoute" | "GRPCRoute" | "TCPRoute" | "TLSRoute" | "Gateway" | "ReferenceGrant",
+          },
+        });
+
+        if (gatewayPolicy) {
+          // Store validation results in annotations field
+          const currentAnnotations = (gatewayPolicy.annotations as Record<string, unknown>) ?? {};
+          await db.gatewayAPIPolicy.update({
+            where: { id: gatewayPolicy.id },
+            data: {
+              annotations: {
+                ...currentAnnotations,
+                "policyhub.io/validation-valid": routeResult.valid.toString(),
+                "policyhub.io/validation-errors": JSON.stringify(routeResult.errors ?? []),
+                "policyhub.io/validation-warnings": JSON.stringify(routeResult.warnings ?? []),
+                "policyhub.io/validation-timestamp": routeResult.validatedAt,
+              },
+            },
+          });
+          gatewayRoutesValidated++;
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       summariesUpserted,
       eventsCreated,
+      gatewayRoutesValidated,
     });
   } catch (error) {
     console.error("Error processing validation data:", error);

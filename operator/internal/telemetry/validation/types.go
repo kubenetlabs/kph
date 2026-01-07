@@ -84,8 +84,30 @@ type ValidationEvent struct {
 
 // ValidationIngestion is the payload sent to SaaS
 type ValidationIngestion struct {
-	Summaries []ValidationSummary `json:"summaries,omitempty"`
-	Events    []ValidationEvent   `json:"events,omitempty"`
+	Summaries          []ValidationSummary       `json:"summaries,omitempty"`
+	Events             []ValidationEvent         `json:"events,omitempty"`
+	GatewayValidation  *GatewayValidationPayload `json:"gatewayValidation,omitempty"`
+}
+
+// GatewayValidationPayload contains Gateway API validation results for SaaS
+type GatewayValidationPayload struct {
+	Timestamp     time.Time                    `json:"timestamp"`
+	TotalRoutes   int                          `json:"totalRoutes"`
+	ValidRoutes   int                          `json:"validRoutes"`
+	InvalidRoutes int                          `json:"invalidRoutes"`
+	TotalGateways int                          `json:"totalGateways"`
+	Results       []GatewayRouteValidation     `json:"results,omitempty"`
+}
+
+// GatewayRouteValidation represents validation result for a single Gateway API route
+type GatewayRouteValidation struct {
+	Kind        string    `json:"kind"`
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	Valid       bool      `json:"valid"`
+	Errors      []string  `json:"errors,omitempty"`
+	Warnings    []string  `json:"warnings,omitempty"`
+	ValidatedAt time.Time `json:"validatedAt"`
 }
 
 // AgentConfig contains configuration for the validation agent

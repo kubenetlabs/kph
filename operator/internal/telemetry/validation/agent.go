@@ -13,11 +13,12 @@ import (
 
 // Agent validates network flows against CiliumNetworkPolicies
 type Agent struct {
-	matcher       *PolicyMatcher
-	reporter      *Reporter
-	log           logr.Logger
-	flushInterval time.Duration
-	policyRefresh time.Duration
+	matcher          *PolicyMatcher
+	gatewayValidator *GatewayValidator
+	reporter         *Reporter
+	log              logr.Logger
+	flushInterval    time.Duration
+	policyRefresh    time.Duration
 
 	// Runtime state
 	running    bool
@@ -62,6 +63,7 @@ func NewAgent(opts AgentOptions) *Agent {
 	}
 
 	matcher := NewPolicyMatcher(opts.Client, opts.Logger)
+	gatewayValidator := NewGatewayValidator(opts.Client, opts.Logger)
 	reporter := NewReporter(ReporterConfig{
 		Endpoint:   opts.SaaSEndpoint,
 		APIKey:     opts.APIKey,
@@ -72,13 +74,14 @@ func NewAgent(opts AgentOptions) *Agent {
 	})
 
 	return &Agent{
-		matcher:       matcher,
-		reporter:      reporter,
-		log:           opts.Logger.WithName("validation-agent"),
-		flushInterval: opts.FlushInterval,
-		policyRefresh: opts.PolicyRefresh,
-		eventsCh:      make(chan *models.TelemetryEvent, opts.EventBufferSize),
-		stopCh:        make(chan struct{}),
+		matcher:          matcher,
+		gatewayValidator: gatewayValidator,
+		reporter:         reporter,
+		log:              opts.Logger.WithName("validation-agent"),
+		flushInterval:    opts.FlushInterval,
+		policyRefresh:    opts.PolicyRefresh,
+		eventsCh:         make(chan *models.TelemetryEvent, opts.EventBufferSize),
+		stopCh:           make(chan struct{}),
 	}
 }
 
@@ -103,9 +106,16 @@ func (a *Agent) Start(ctx context.Context) error {
 		// Continue anyway - will retry
 	}
 
+	// Initial Gateway API validation
+	if _, err := a.gatewayValidator.ValidateAll(ctx); err != nil {
+		a.log.Error(err, "Initial Gateway API validation failed")
+		// Continue anyway - will retry
+	}
+
 	// Start background workers
 	go a.processEvents(ctx)
 	go a.refreshPoliciesLoop(ctx)
+	go a.gatewayValidationLoop(ctx)
 	go a.flushLoop(ctx)
 
 	return nil
@@ -194,6 +204,34 @@ func (a *Agent) refreshPoliciesLoop(ctx context.Context) {
 			if err := a.matcher.RefreshPolicies(ctx); err != nil {
 				a.log.Error(err, "Failed to refresh policies")
 			}
+		}
+	}
+}
+
+// gatewayValidationLoop periodically validates Gateway API resources
+func (a *Agent) gatewayValidationLoop(ctx context.Context) {
+	// Run Gateway API validation at the same interval as policy refresh
+	ticker := time.NewTicker(a.policyRefresh)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.stopCh:
+			return
+		case <-ticker.C:
+			summary, err := a.gatewayValidator.ValidateAll(ctx)
+			if err != nil {
+				a.log.Error(err, "Failed to validate Gateway API resources")
+				continue
+			}
+			// Record results for reporting
+			a.reporter.RecordGatewayValidation(summary)
+			a.log.V(1).Info("Gateway API validation complete",
+				"totalRoutes", summary.TotalRoutes,
+				"validRoutes", summary.ValidRoutes,
+				"invalidRoutes", summary.InvalidRoutes)
 		}
 	}
 }

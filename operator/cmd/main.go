@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -11,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	policyv1alpha1 "github.com/policy-hub/operator/api/v1alpha1"
 	"github.com/policy-hub/operator/internal/controller"
@@ -25,6 +27,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(policyv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ciliumv2.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 }
 
 func main() {

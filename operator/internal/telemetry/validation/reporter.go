@@ -33,6 +33,9 @@ type Reporter struct {
 	eventCounter  int64
 	sampleRate    int
 
+	// Gateway API validation state
+	gatewayValidation *GatewayValidationPayload
+
 	// Stats
 	totalSent   int64
 	totalFailed int64
@@ -150,7 +153,7 @@ func (r *Reporter) Flush(ctx context.Context) error {
 	r.mu.Lock()
 
 	// Nothing to send
-	if r.allowedCount == 0 && r.blockedCount == 0 && r.noPolicyCount == 0 {
+	if r.allowedCount == 0 && r.blockedCount == 0 && r.noPolicyCount == 0 && r.gatewayValidation == nil {
 		r.mu.Unlock()
 		return nil
 	}
@@ -183,6 +186,9 @@ func (r *Reporter) Flush(ctx context.Context) error {
 	events := make([]ValidationEvent, len(r.recentEvents))
 	copy(events, r.recentEvents)
 
+	// Copy Gateway API validation
+	gatewayValidation := r.gatewayValidation
+
 	// Reset state
 	r.allowedCount = 0
 	r.blockedCount = 0
@@ -190,13 +196,15 @@ func (r *Reporter) Flush(ctx context.Context) error {
 	r.coverageGaps = make(map[string]*CoverageGap)
 	r.topBlocked = make(map[string]*BlockedFlow)
 	r.recentEvents = r.recentEvents[:0]
+	r.gatewayValidation = nil
 
 	r.mu.Unlock()
 
 	// Send to SaaS
 	payload := ValidationIngestion{
-		Summaries: []ValidationSummary{summary},
-		Events:    events,
+		Summaries:         []ValidationSummary{summary},
+		Events:            events,
+		GatewayValidation: gatewayValidation,
 	}
 
 	if err := r.send(ctx, payload); err != nil {
@@ -248,6 +256,39 @@ func (r *Reporter) send(ctx context.Context, payload ValidationIngestion) error 
 	}
 
 	return nil
+}
+
+// RecordGatewayValidation records Gateway API validation results
+func (r *Reporter) RecordGatewayValidation(summary *GatewayValidationSummary) {
+	if summary == nil {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Convert to payload format
+	results := make([]GatewayRouteValidation, 0, len(summary.ValidationResults))
+	for _, result := range summary.ValidationResults {
+		results = append(results, GatewayRouteValidation{
+			Kind:        result.Kind,
+			Name:        result.Name,
+			Namespace:   result.Namespace,
+			Valid:       result.Valid,
+			Errors:      result.Errors,
+			Warnings:    result.Warnings,
+			ValidatedAt: result.ValidatedAt,
+		})
+	}
+
+	r.gatewayValidation = &GatewayValidationPayload{
+		Timestamp:     summary.Timestamp,
+		TotalRoutes:   summary.TotalRoutes,
+		ValidRoutes:   summary.ValidRoutes,
+		InvalidRoutes: summary.InvalidRoutes,
+		TotalGateways: summary.TotalGateways,
+		Results:       results,
+	}
 }
 
 // GetStats returns reporter statistics

@@ -16,6 +16,7 @@ import (
 	"github.com/policy-hub/operator/internal/telemetry/aggregator"
 	"github.com/policy-hub/operator/internal/telemetry/collector"
 	"github.com/policy-hub/operator/internal/telemetry/models"
+	"github.com/policy-hub/operator/internal/telemetry/validation"
 )
 
 // PolicyHubConfigReconciler reconciles a PolicyHubConfig object
@@ -35,6 +36,9 @@ type PolicyHubConfigReconciler struct {
 	saasSender        *aggregator.SaaSSender
 	telemetryStarted  bool
 	telemetryMu       stdsync.Mutex
+
+	// Validation agent
+	validationAgent   *validation.Agent
 }
 
 // +kubebuilder:rbac:groups=policyhub.io,resources=policyhubconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -168,6 +172,9 @@ func (r *PolicyHubConfigReconciler) startBackgroundTasks() {
 
 	// Start telemetry collection if enabled
 	r.startTelemetryCollection(bgCtx)
+
+	// Start validation agent if enabled
+	r.startValidationAgent(bgCtx)
 }
 
 // startTelemetryCollection starts Hubble flow collection and SaaS sending
@@ -296,6 +303,53 @@ func (r *PolicyHubConfigReconciler) startTelemetryCollection(ctx context.Context
 
 	r.telemetryStarted = true
 	r.Log.Info("Telemetry collection started")
+}
+
+// startValidationAgent starts the validation agent for Gateway API and policy validation
+func (r *PolicyHubConfigReconciler) startValidationAgent(ctx context.Context) {
+	// Skip if validation agent already running
+	if r.validationAgent != nil && r.validationAgent.IsRunning() {
+		return
+	}
+
+	// Get telemetry endpoint and credentials (reuse from telemetry)
+	endpoint := r.Reconciler.GetTelemetryEndpoint()
+	clusterID := r.Reconciler.GetClusterID()
+	apiToken, err := r.Reconciler.GetAPIToken(ctx)
+	if err != nil {
+		r.Log.Error(err, "Failed to get API token for validation agent")
+		return
+	}
+
+	if endpoint == "" || clusterID == "" || apiToken == "" {
+		r.Log.Info("Validation agent not configured (missing endpoint, clusterID, or apiToken)")
+		return
+	}
+
+	r.Log.Info("Starting validation agent",
+		"endpoint", endpoint,
+		"clusterID", clusterID)
+
+	// Create validation agent
+	r.validationAgent = validation.NewAgent(validation.AgentOptions{
+		Client:          r.Client,
+		SaaSEndpoint:    endpoint,
+		APIKey:          apiToken,
+		ClusterID:       clusterID,
+		FlushInterval:   time.Minute,
+		PolicyRefresh:   30 * time.Second,
+		EventBufferSize: 1000,
+		EventSampleRate: 10, // Sample 1 in 10 flow events
+		Logger:          r.Log,
+	})
+
+	// Start the agent
+	if err := r.validationAgent.Start(ctx); err != nil {
+		r.Log.Error(err, "Failed to start validation agent")
+		return
+	}
+
+	r.Log.Info("Validation agent started")
 }
 
 // SetupWithManager sets up the controller with the Manager

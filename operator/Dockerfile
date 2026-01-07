@@ -1,5 +1,5 @@
 # Build stage - run on target platform for CGO compatibility
-FROM --platform=$TARGETPLATFORM golang:1.22-alpine AS builder
+FROM --platform=$TARGETPLATFORM golang:1.24-alpine AS builder
 
 WORKDIR /workspace
 
