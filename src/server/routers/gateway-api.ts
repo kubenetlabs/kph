@@ -536,6 +536,105 @@ export const gatewayApiRouter = createTRPCRouter({
       return resource;
     }),
 
+  // Get validation status for Gateway API resources
+  getValidationStatus: protectedProcedure
+    .input(z.object({ clusterId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      // Verify cluster belongs to organization
+      const cluster = await ctx.db.cluster.findFirst({
+        where: {
+          id: input.clusterId,
+          organizationId: ctx.organizationId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!cluster) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Cluster not found",
+        });
+      }
+
+      // Get all Gateway API resources with their annotations
+      const resources = await ctx.db.gatewayAPIPolicy.findMany({
+        where: { clusterId: input.clusterId },
+        select: {
+          id: true,
+          kind: true,
+          name: true,
+          namespace: true,
+          status: true,
+          annotations: true,
+          syncedAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+
+      // Extract validation status from annotations
+      const validationResults = resources.map((resource) => {
+        const annotations = (resource.annotations as Record<string, string>) ?? {};
+
+        const validStr = annotations["policyhub.io/validation-valid"];
+        const errorsStr = annotations["policyhub.io/validation-errors"];
+        const warningsStr = annotations["policyhub.io/validation-warnings"];
+        const timestampStr = annotations["policyhub.io/validation-timestamp"];
+
+        let errors: string[] = [];
+        let warnings: string[] = [];
+
+        try {
+          if (errorsStr) errors = JSON.parse(errorsStr);
+        } catch {
+          // ignore parse errors
+        }
+
+        try {
+          if (warningsStr) warnings = JSON.parse(warningsStr);
+        } catch {
+          // ignore parse errors
+        }
+
+        return {
+          id: resource.id,
+          kind: resource.kind,
+          name: resource.name,
+          namespace: resource.namespace,
+          deploymentStatus: resource.status,
+          syncedAt: resource.syncedAt,
+          validation: timestampStr ? {
+            valid: validStr === "true",
+            errors,
+            warnings,
+            validatedAt: timestampStr,
+          } : null,
+        };
+      });
+
+      // Calculate summary stats
+      const total = validationResults.length;
+      const validated = validationResults.filter((r) => r.validation !== null).length;
+      const valid = validationResults.filter((r) => r.validation?.valid === true).length;
+      const invalid = validationResults.filter((r) => r.validation?.valid === false).length;
+      const pending = validationResults.filter((r) => r.validation === null).length;
+
+      return {
+        cluster,
+        summary: {
+          total,
+          validated,
+          valid,
+          invalid,
+          pending,
+        },
+        resources: validationResults,
+      };
+    }),
+
   // Simulate Gateway API resources (for what-if analysis)
   simulate: protectedProcedure
     .input(
