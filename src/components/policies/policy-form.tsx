@@ -30,6 +30,7 @@ const policySchema = z.object({
       "GATEWAY_HTTPROUTE",
       "GATEWAY_GRPCROUTE",
       "GATEWAY_TCPROUTE",
+      "GATEWAY_TLSROUTE",
     ],
     {
       errorMap: () => ({ message: "Please select a policy type" }),
@@ -64,7 +65,7 @@ interface PolicyFormProps {
   onSubmit: (data: {
     name: string;
     description?: string;
-    type: "CILIUM_NETWORK" | "CILIUM_CLUSTERWIDE" | "TETRAGON" | "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE";
+    type: "CILIUM_NETWORK" | "CILIUM_CLUSTERWIDE" | "TETRAGON" | "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE" | "GATEWAY_TLSROUTE";
     clusterId: string;
     content: string;
     targetNamespaces: string[];
@@ -81,6 +82,7 @@ const policyTypeOptions = [
   { value: "GATEWAY_HTTPROUTE", label: "Gateway HTTP Route" },
   { value: "GATEWAY_GRPCROUTE", label: "Gateway gRPC Route" },
   { value: "GATEWAY_TCPROUTE", label: "Gateway TCP Route" },
+  { value: "GATEWAY_TLSROUTE", label: "Gateway TLS Route" },
 ];
 
 const policyTemplates: Record<string, string> = {
@@ -175,6 +177,20 @@ spec:
     - backendRefs:
         - name: tcp-service
           port: 5432`,
+  GATEWAY_TLSROUTE: `apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: "policy-name"
+  namespace: "default"
+spec:
+  parentRefs:
+    - name: my-gateway
+  hostnames:
+    - "secure.example.com"
+  rules:
+    - backendRefs:
+        - name: tls-service
+          port: 443`,
 };
 
 export default function PolicyForm({

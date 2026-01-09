@@ -18,7 +18,8 @@ type PolicyType =
   | "TETRAGON"
   | "GATEWAY_HTTPROUTE"
   | "GATEWAY_GRPCROUTE"
-  | "GATEWAY_TCPROUTE";
+  | "GATEWAY_TCPROUTE"
+  | "GATEWAY_TLSROUTE";
 
 interface GeneratedPolicy {
   name: string;

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
+import {
+  isGatewayAPIType,
+  validateGatewayAPIPolicy,
+} from "~/lib/gateway-api-validator";
 
 // Use orgProtectedProcedure for all policy operations (requires organization)
 const protectedProcedure = orgProtectedProcedure;
@@ -225,6 +229,12 @@ export const policyRouter = createTRPCRouter({
         });
       }
 
+      // Validate Gateway API YAML if applicable
+      if (isGatewayAPIType(input.type)) {
+        // This will throw a TRPCError with BAD_REQUEST if validation fails
+        validateGatewayAPIPolicy(input.content, input.type);
+      }
+
       const policy = await ctx.db.policy.create({
         data: {
           name: input.name,
@@ -303,8 +313,17 @@ export const policyRouter = createTRPCRouter({
         }
       }
 
-      // If content is changing, create a new version
+      // If content is changing, validate and create a new version
       if (data.content && data.content !== existing.content) {
+        // Determine the policy type (use updated type if provided, otherwise existing)
+        const policyType = data.type ?? existing.type;
+
+        // Validate Gateway API YAML if applicable
+        if (isGatewayAPIType(policyType)) {
+          // This will throw a TRPCError with BAD_REQUEST if validation fails
+          validateGatewayAPIPolicy(data.content, policyType);
+        }
+
         const latestVersion = await ctx.db.policyVersion.findFirst({
           where: { policyId: id },
           orderBy: { version: "desc" },
