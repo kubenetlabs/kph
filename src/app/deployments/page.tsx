@@ -48,7 +48,7 @@ export default function DeploymentsPage() {
   const { data: clusters } = trpc.cluster.list.useQuery();
 
   // Fetch deployment stats
-  const { data: stats, isLoading: statsLoading } = trpc.deployment.getStats.useQuery(undefined, {
+  const { data: stats } = trpc.deployment.getStats.useQuery(undefined, {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 

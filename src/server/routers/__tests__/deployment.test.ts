@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/dot-notation */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TRPCError } from "@trpc/server";
-import { createMockPrismaClient, factories, MockPrismaClient } from "~/test/db-mock";
+import { createMockPrismaClient, factories } from "~/test/db-mock";
 
 // Mock the database
 const mockDb = createMockPrismaClient();
@@ -34,7 +36,6 @@ describe("Deployment Router", () => {
         }))
       );
 
-      const result = mockDb.policyDeployment.findMany.mock.results;
       expect(deployments).toHaveLength(3);
     });
 
