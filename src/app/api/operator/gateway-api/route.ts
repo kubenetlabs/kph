@@ -7,8 +7,30 @@ import {
 } from "~/lib/api-auth";
 
 /**
+ * Adds deprecation headers to a response.
+ * This endpoint is deprecated in favor of /api/operator/policies which handles
+ * all policy types including Gateway API routes (GATEWAY_HTTPROUTE, etc.)
+ */
+function addDeprecationHeaders(response: NextResponse): NextResponse {
+  response.headers.set("Deprecation", "true");
+  response.headers.set("Sunset", "2026-06-01");
+  response.headers.set(
+    "Link",
+    '</api/operator/policies>; rel="successor-version"'
+  );
+  response.headers.set(
+    "X-Deprecation-Notice",
+    "This endpoint is deprecated. Use /api/operator/policies with GATEWAY_* policy types instead."
+  );
+  return response;
+}
+
+/**
  * GET /api/operator/gateway-api
  * Returns all Gateway API resources that should be deployed to the cluster.
+ *
+ * @deprecated Use /api/operator/policies with GATEWAY_* policy types instead.
+ * Gateway API routes are now managed through the consolidated Policy model.
  */
 export async function GET(request: NextRequest) {
   // Authenticate the operator
@@ -63,17 +85,26 @@ export async function GET(request: NextRequest) {
       lastUpdated: r.updatedAt.toISOString(),
     }));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       resources: operatorResources,
       count: operatorResources.length,
+      _deprecation: {
+        message:
+          "This endpoint is deprecated. Use /api/operator/policies with GATEWAY_* policy types instead.",
+        successor: "/api/operator/policies",
+        sunset: "2026-06-01",
+      },
     });
+
+    return addDeprecationHeaders(response);
   } catch (error) {
     console.error("Error fetching Gateway API resources:", error);
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
     );
+    return addDeprecationHeaders(response);
   }
 }

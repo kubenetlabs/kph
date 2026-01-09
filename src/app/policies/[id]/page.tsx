@@ -16,7 +16,8 @@ type PolicyType =
   | "TETRAGON"
   | "GATEWAY_HTTPROUTE"
   | "GATEWAY_GRPCROUTE"
-  | "GATEWAY_TCPROUTE";
+  | "GATEWAY_TCPROUTE"
+  | "GATEWAY_TLSROUTE";
 
 type PolicyStatus =
   | "DRAFT"
@@ -33,6 +34,7 @@ const typeConfig: Record<PolicyType, { variant: "cilium" | "tetragon" | "gateway
   GATEWAY_HTTPROUTE: { variant: "gateway", label: "Gateway HTTP Route" },
   GATEWAY_GRPCROUTE: { variant: "gateway", label: "Gateway gRPC Route" },
   GATEWAY_TCPROUTE: { variant: "gateway", label: "Gateway TCP Route" },
+  GATEWAY_TLSROUTE: { variant: "gateway", label: "Gateway TLS Route" },
 };
 
 const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warning" | "success" | "danger"; label: string }> = {

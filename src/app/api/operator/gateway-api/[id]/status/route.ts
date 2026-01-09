@@ -13,8 +13,30 @@ const statusUpdateSchema = z.object({
 });
 
 /**
+ * Adds deprecation headers to a response.
+ * This endpoint is deprecated in favor of /api/operator/policies/[id]/status
+ * which handles all policy types including Gateway API routes.
+ */
+function addDeprecationHeaders(response: NextResponse): NextResponse {
+  response.headers.set("Deprecation", "true");
+  response.headers.set("Sunset", "2026-06-01");
+  response.headers.set(
+    "Link",
+    '</api/operator/policies/{id}/status>; rel="successor-version"'
+  );
+  response.headers.set(
+    "X-Deprecation-Notice",
+    "This endpoint is deprecated. Use /api/operator/policies/[id]/status for GATEWAY_* policy types instead."
+  );
+  return response;
+}
+
+/**
  * PATCH /api/operator/gateway-api/[id]/status
  * Update the deployment status of a Gateway API resource.
+ *
+ * @deprecated Use /api/operator/policies/[id]/status for GATEWAY_* policy types instead.
+ * Gateway API routes are now managed through the consolidated Policy model.
  */
 export async function PATCH(
   request: NextRequest,
@@ -39,7 +61,7 @@ export async function PATCH(
     // Validate request body
     const validationResult = statusUpdateSchema.safeParse(body);
     if (!validationResult.success) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           error: "Validation failed",
           details: validationResult.error.errors.map((e) => ({
@@ -49,6 +71,7 @@ export async function PATCH(
         },
         { status: 400 }
       );
+      return addDeprecationHeaders(response);
     }
 
     const { status, error } = validationResult.data;
@@ -62,10 +85,11 @@ export async function PATCH(
     });
 
     if (!resource) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Gateway API resource not found" },
         { status: 404 }
       );
+      return addDeprecationHeaders(response);
     }
 
     // Update resource status
@@ -90,26 +114,35 @@ export async function PATCH(
       },
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       resourceId: updatedResource.id,
       kind: updatedResource.kind,
       name: updatedResource.name,
       status: updatedResource.status,
+      _deprecation: {
+        message:
+          "This endpoint is deprecated. Use /api/operator/policies/[id]/status for GATEWAY_* policy types instead.",
+        successor: "/api/operator/policies/{id}/status",
+        sunset: "2026-06-01",
+      },
     });
+    return addDeprecationHeaders(response);
   } catch (error) {
     console.error("Error updating Gateway API resource status:", error);
 
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Invalid JSON in request body" },
         { status: 400 }
       );
+      return addDeprecationHeaders(response);
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
     );
+    return addDeprecationHeaders(response);
   }
 }

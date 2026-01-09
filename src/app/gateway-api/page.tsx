@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
+import Button from "~/components/ui/button";
 import { trpc } from "~/lib/trpc";
 
 function StatusBadge({ status }: { status: string }) {
@@ -74,11 +76,31 @@ export default function GatewayAPIStatusPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Gateway API Status</h1>
           <p className="mt-1 text-muted">
-            Validation status for HTTPRoutes, GRPCRoutes, and other Gateway API resources
+            Validation status for HTTPRoutes, GRPCRoutes, TCPRoutes, and TLSRoutes
           </p>
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Create button */}
+          <Link href="/policies/new">
+            <Button>
+              <svg
+                className="mr-2 h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              Create Gateway Route
+            </Button>
+          </Link>
+
           {/* Refresh button */}
           <button
             onClick={() => refetch()}
@@ -166,8 +188,15 @@ export default function GatewayAPIStatusPage() {
             </CardHeader>
             <CardContent>
               {data.resources.length === 0 ? (
-                <div className="text-center text-muted py-8">
-                  No Gateway API resources found in this cluster
+                <div className="text-center py-8">
+                  <p className="text-muted mb-4">
+                    No Gateway API resources found in this cluster
+                  </p>
+                  <Link href="/policies/new">
+                    <Button variant="secondary">
+                      Create your first Gateway Route
+                    </Button>
+                  </Link>
                 </div>
               ) : (
                 <div className="space-y-2">
