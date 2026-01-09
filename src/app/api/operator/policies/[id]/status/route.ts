@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { db } from "~/lib/db";
 import {
   authenticateOperatorToken,
@@ -8,8 +9,17 @@ import {
 } from "~/lib/api-auth";
 
 const statusUpdateSchema = z.object({
-  status: z.enum(["DEPLOYED", "FAILED"]),
+  status: z.enum(["IN_PROGRESS", "DEPLOYED", "FAILED"]),
   error: z.string().optional(),
+  errorDetails: z
+    .object({
+      type: z.string().optional(), // e.g., "ValidationError", "K8sAPIError", "NetworkError"
+      resource: z.string().optional(), // e.g., "CiliumNetworkPolicy/my-policy"
+      reason: z.string().optional(), // K8s reason code
+      retryable: z.boolean().optional(), // Whether the error is retryable
+      suggestion: z.string().optional(), // Suggested fix
+    })
+    .optional(),
   deployedResources: z
     .array(
       z.object({
@@ -62,7 +72,7 @@ export async function PATCH(
       );
     }
 
-    const { status, error, deployedResources, version } = validationResult.data;
+    const { status, error, errorDetails, deployedResources, version } = validationResult.data;
 
     // Verify policy belongs to this cluster
     const policy = await db.policy.findFirst({
@@ -76,7 +86,36 @@ export async function PATCH(
       return NextResponse.json({ error: "Policy not found" }, { status: 404 });
     }
 
-    // Update policy status
+    // Handle IN_PROGRESS status differently - don't update Policy.status yet
+    if (status === "IN_PROGRESS") {
+      // Find the pending deployment and mark it as in progress
+      const pendingDeployment = await db.policyDeployment.findFirst({
+        where: {
+          policyId: policyId,
+          status: "PENDING",
+        },
+        orderBy: { requestedAt: "desc" },
+      });
+
+      if (pendingDeployment) {
+        await db.policyDeployment.update({
+          where: { id: pendingDeployment.id },
+          data: {
+            status: "IN_PROGRESS",
+            startedAt: new Date(),
+          },
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        policyId: policy.id,
+        status: "IN_PROGRESS",
+        deployedVersion: policy.deployedVersion,
+      });
+    }
+
+    // Update policy status for DEPLOYED or FAILED
     const updatedPolicy = await db.policy.update({
       where: { id: policyId },
       data: {
@@ -86,23 +125,24 @@ export async function PATCH(
       },
     });
 
-    // Update the most recent PENDING PolicyDeployment for this policy
-    const pendingDeployment = await db.policyDeployment.findFirst({
+    // Update the most recent PENDING or IN_PROGRESS PolicyDeployment for this policy
+    const activeDeployment = await db.policyDeployment.findFirst({
       where: {
         policyId: policyId,
-        status: "PENDING",
+        status: { in: ["PENDING", "IN_PROGRESS"] },
       },
       orderBy: { requestedAt: "desc" },
     });
 
-    if (pendingDeployment) {
+    if (activeDeployment) {
       const deploymentStatus = status === "DEPLOYED" ? "SUCCEEDED" : "FAILED";
       await db.policyDeployment.update({
-        where: { id: pendingDeployment.id },
+        where: { id: activeDeployment.id },
         data: {
           status: deploymentStatus,
           completedAt: new Date(),
           errorMessage: error ?? null,
+          errorDetails: errorDetails ?? Prisma.DbNull,
           resourceName: deployedResources?.[0]?.name ?? null,
           resourceNamespace: deployedResources?.[0]?.namespace ?? null,
         },

@@ -537,6 +537,7 @@ export const gatewayApiRouter = createTRPCRouter({
     }),
 
   // Get validation status for Gateway API resources
+  // NOTE: Gateway API routes are stored in the Policy table with type GATEWAY_*
   getValidationStatus: protectedProcedure
     .input(z.object({ clusterId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -559,59 +560,58 @@ export const gatewayApiRouter = createTRPCRouter({
         });
       }
 
-      // Get all Gateway API resources with their annotations
-      const resources = await ctx.db.gatewayAPIPolicy.findMany({
-        where: { clusterId: input.clusterId },
+      // Get Gateway API resources from the Policy table (type starts with GATEWAY_)
+      const policies = await ctx.db.policy.findMany({
+        where: {
+          clusterId: input.clusterId,
+          type: {
+            in: ["GATEWAY_HTTPROUTE", "GATEWAY_GRPCROUTE", "GATEWAY_TCPROUTE", "GATEWAY_TLSROUTE"],
+          },
+        },
         select: {
           id: true,
-          kind: true,
           name: true,
-          namespace: true,
+          type: true,
           status: true,
-          annotations: true,
-          syncedAt: true,
+          content: true,
+          targetNamespaces: true,
+          deployedAt: true,
           updatedAt: true,
         },
         orderBy: { updatedAt: "desc" },
       });
 
-      // Extract validation status from annotations
-      const validationResults = resources.map((resource) => {
-        const annotations = (resource.annotations as Record<string, string>) ?? {};
+      // Map policy types to Gateway API kinds
+      const typeToKind: Record<string, string> = {
+        GATEWAY_HTTPROUTE: "HTTPRoute",
+        GATEWAY_GRPCROUTE: "GRPCRoute",
+        GATEWAY_TCPROUTE: "TCPRoute",
+        GATEWAY_TLSROUTE: "TLSRoute",
+      };
 
-        const validStr = annotations["policyhub.io/validation-valid"];
-        const errorsStr = annotations["policyhub.io/validation-errors"];
-        const warningsStr = annotations["policyhub.io/validation-warnings"];
-        const timestampStr = annotations["policyhub.io/validation-timestamp"];
+      // Transform to validation results format
+      const validationResults = policies.map((policy) => {
+        // Parse the YAML to extract namespace (default to first target namespace or "default")
+        const namespace = policy.targetNamespaces[0] ?? "default";
 
-        let errors: string[] = [];
-        let warnings: string[] = [];
-
-        try {
-          if (errorsStr) errors = JSON.parse(errorsStr) as string[];
-        } catch {
-          // ignore parse errors
-        }
-
-        try {
-          if (warningsStr) warnings = JSON.parse(warningsStr) as string[];
-        } catch {
-          // ignore parse errors
-        }
+        // For now, mark deployed policies as valid, others as pending validation
+        const isDeployed = policy.status === "DEPLOYED";
 
         return {
-          id: resource.id,
-          kind: resource.kind,
-          name: resource.name,
-          namespace: resource.namespace,
-          deploymentStatus: resource.status,
-          syncedAt: resource.syncedAt,
-          validation: timestampStr ? {
-            valid: validStr === "true",
-            errors,
-            warnings,
-            validatedAt: timestampStr,
-          } : null,
+          id: policy.id,
+          kind: typeToKind[policy.type] ?? policy.type,
+          name: policy.name,
+          namespace: namespace,
+          deploymentStatus: policy.status,
+          syncedAt: policy.deployedAt,
+          validation: isDeployed
+            ? {
+                valid: true,
+                errors: [] as string[],
+                warnings: [] as string[],
+                validatedAt: policy.deployedAt?.toISOString() ?? policy.updatedAt.toISOString(),
+              }
+            : null,
         };
       });
 

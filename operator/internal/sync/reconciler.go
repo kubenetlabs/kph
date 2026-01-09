@@ -490,6 +490,16 @@ func (r *Reconciler) ReconcilePolicy(ctx context.Context, mp *policyv1alpha1.Man
 		return err
 	}
 
+	// Report IN_PROGRESS to SaaS before starting deployment
+	_, err := r.saasClient.UpdatePolicyStatus(ctx, mp.Spec.PolicyID, saas.UpdatePolicyStatusRequest{
+		Status:  "IN_PROGRESS",
+		Version: mp.Spec.Version,
+	})
+	if err != nil {
+		log.Error(err, "Failed to report IN_PROGRESS status to SaaS")
+		// Continue with deployment even if status report fails
+	}
+
 	// Deploy the policy
 	result := r.deployer.Deploy(ctx, mp)
 	if !result.Success {
@@ -529,7 +539,7 @@ func (r *Reconciler) ReconcilePolicy(ctx context.Context, mp *policyv1alpha1.Man
 		}
 	}
 
-	_, err := r.saasClient.UpdatePolicyStatus(ctx, mp.Spec.PolicyID, saas.UpdatePolicyStatusRequest{
+	_, err = r.saasClient.UpdatePolicyStatus(ctx, mp.Spec.PolicyID, saas.UpdatePolicyStatusRequest{
 		Status:            "DEPLOYED",
 		DeployedResources: deployedResources,
 		Version:           mp.Spec.Version,

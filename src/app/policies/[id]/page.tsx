@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -114,6 +114,27 @@ export default function PolicyDetailPage() {
     { enabled: !!policyId }
   );
 
+  // Poll for active deployment status
+  const { data: activeDeploymentData } = trpc.deployment.getActiveDeployment.useQuery(
+    { policyId },
+    {
+      enabled: !!policyId,
+      refetchInterval: (query) => {
+        // Poll every 2 seconds while there's an active deployment
+        return query.state.data?.hasActiveDeployment ? 2000 : false;
+      },
+    }
+  );
+
+  // Refresh data when deployment completes
+  useEffect(() => {
+    if (activeDeploymentData && !activeDeploymentData.hasActiveDeployment) {
+      // Deployment completed - refresh policy and deployment history
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.deployment.listByPolicy.invalidate({ policyId });
+    }
+  }, [activeDeploymentData?.hasActiveDeployment, policyId, utils]);
+
   // Rollback mutation
   const rollbackMutation = trpc.deployment.rollback.useMutation({
     onSuccess: () => {
@@ -124,6 +145,18 @@ export default function PolicyDetailPage() {
       setRollbackNote("");
     },
   });
+
+  // Retry mutation
+  const retryMutation = trpc.deployment.retry.useMutation({
+    onSuccess: () => {
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.deployment.listByPolicy.invalidate({ policyId });
+    },
+  });
+
+  const handleRetry = (deploymentId: string) => {
+    retryMutation.mutate({ deploymentId });
+  };
 
   const handleUpdate = (formData: {
     name: string;
@@ -259,13 +292,19 @@ export default function PolicyDetailPage() {
           </div>
 
           <div className="flex gap-2">
-            {policy.status === "DRAFT" && (
+            {(policy.status === "DRAFT" || policy.status === "FAILED") && (
               <Button
                 variant="secondary"
                 onClick={handleDeploy}
-                disabled={deployMutation.isPending}
+                disabled={deployMutation.isPending || activeDeploymentData?.hasActiveDeployment}
               >
                 {deployMutation.isPending ? "Deploying..." : "Deploy Policy"}
+              </Button>
+            )}
+            {policy.status === "PENDING" && (
+              <Button variant="secondary" disabled>
+                <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Deploying...
               </Button>
             )}
             {policy.status === "DEPLOYED" && (
@@ -289,6 +328,37 @@ export default function PolicyDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Active Deployment Progress */}
+      {activeDeploymentData?.hasActiveDeployment && activeDeploymentData.deployment && (
+        <div className="mb-6 rounded-lg border border-accent/30 bg-accent/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-foreground">
+                  {activeDeploymentData.deployment.status === "PENDING"
+                    ? "Deployment Queued"
+                    : "Deploying to Cluster"}
+                </span>
+                <Badge variant="accent">
+                  {activeDeploymentData.deployment.status === "PENDING"
+                    ? "Pending"
+                    : "In Progress"}
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm text-muted">
+                Version {activeDeploymentData.deployment.version.version} •
+                Triggered by {activeDeploymentData.deployment.deployedBy.name ?? activeDeploymentData.deployment.deployedBy.email}
+                {activeDeploymentData.deployment.status === "IN_PROGRESS" &&
+                  activeDeploymentData.deployment.startedAt && (
+                    <> • Started {new Date(activeDeploymentData.deployment.startedAt).toLocaleTimeString()}</>
+                  )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="grid grid-cols-3 gap-6">
@@ -396,75 +466,161 @@ export default function PolicyDetailPage() {
                   {deployments.deployments.map((deployment, idx) => {
                     const isLatestSuccess = idx === 0 && deployment.status === "SUCCEEDED";
                     const canRollback = deployment.status === "SUCCEEDED" && !isLatestSuccess;
+                    const canRetry = deployment.status === "FAILED" &&
+                      deployment.retryCount < deployment.maxRetries;
+                    const errorDetails = deployment.errorDetails as {
+                      type?: string;
+                      resource?: string;
+                      reason?: string;
+                      retryable?: boolean;
+                      suggestion?: string;
+                    } | null;
 
                     return (
                       <div
                         key={deployment.id}
-                        className={`flex items-center justify-between rounded-md border p-3 ${
+                        className={`rounded-md border p-3 ${
                           isLatestSuccess
                             ? "border-success/30 bg-success/5"
+                            : deployment.status === "FAILED"
+                            ? "border-danger/30 bg-danger/5"
                             : "border-card-border"
                         }`}
                       >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-foreground">
-                              Version {deployment.version.version}
-                            </span>
-                            {deployment.isRollback && (
-                              <Badge variant="warning">Rollback</Badge>
-                            )}
-                            {isLatestSuccess && (
-                              <Badge variant="success">Current</Badge>
-                            )}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                            <span>
-                              By {deployment.deployedBy.name ?? deployment.deployedBy.email}
-                            </span>
-                            {deployment.completedAt && (
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-foreground">
+                                Version {deployment.version.version}
+                              </span>
+                              {deployment.isRollback && (
+                                <Badge variant="warning">Rollback</Badge>
+                              )}
+                              {isLatestSuccess && (
+                                <Badge variant="success">Current</Badge>
+                              )}
+                              {deployment.retryCount > 0 && (
+                                <Badge variant="muted">
+                                  Retry {deployment.retryCount}/{deployment.maxRetries}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                               <span>
-                                {new Date(deployment.completedAt).toLocaleString()}
+                                By {deployment.deployedBy.name ?? deployment.deployedBy.email}
                               </span>
-                            )}
-                            {deployment.rollbackNote && (
-                              <span className="italic">
-                                &quot;{deployment.rollbackNote}&quot;
-                              </span>
-                            )}
+                              {deployment.completedAt && (
+                                <span>
+                                  {new Date(deployment.completedAt).toLocaleString()}
+                                </span>
+                              )}
+                              {deployment.rollbackNote && (
+                                <span className="italic">
+                                  &quot;{deployment.rollbackNote}&quot;
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant={
-                              deployment.status === "SUCCEEDED"
-                                ? "success"
-                                : deployment.status === "FAILED"
-                                ? "danger"
-                                : deployment.status === "IN_PROGRESS"
-                                ? "accent"
-                                : deployment.status === "ROLLED_BACK"
-                                ? "warning"
-                                : "muted"
-                            }
-                          >
-                            {deployment.status.replace("_", " ")}
-                          </Badge>
-                          {canRollback && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                openRollbackModal(
-                                  deployment.id,
-                                  deployment.version.version
-                                )
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={
+                                deployment.status === "SUCCEEDED"
+                                  ? "success"
+                                  : deployment.status === "FAILED"
+                                  ? "danger"
+                                  : deployment.status === "IN_PROGRESS"
+                                  ? "accent"
+                                  : deployment.status === "ROLLED_BACK"
+                                  ? "warning"
+                                  : "muted"
                               }
                             >
-                              Rollback
-                            </Button>
-                          )}
+                              {deployment.status.replace("_", " ")}
+                            </Badge>
+                            {canRetry && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRetry(deployment.id)}
+                                disabled={retryMutation.isPending}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                            {canRollback && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  openRollbackModal(
+                                    deployment.id,
+                                    deployment.version.version
+                                  )
+                                }
+                              >
+                                Rollback
+                              </Button>
+                            )}
+                          </div>
                         </div>
+
+                        {/* Error Details */}
+                        {deployment.status === "FAILED" && deployment.errorMessage && (
+                          <div className="mt-3 rounded-md bg-danger/10 p-3">
+                            <div className="flex items-start gap-2">
+                              <svg
+                                className="h-4 w-4 mt-0.5 text-danger flex-shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-danger font-medium">
+                                  Deployment Failed
+                                </p>
+                                <p className="mt-1 text-sm text-foreground">
+                                  {deployment.errorMessage}
+                                </p>
+                                {errorDetails && (
+                                  <div className="mt-2 space-y-1 text-xs text-muted">
+                                    {errorDetails.type && (
+                                      <p>
+                                        <span className="font-medium">Type:</span> {errorDetails.type}
+                                      </p>
+                                    )}
+                                    {errorDetails.resource && (
+                                      <p>
+                                        <span className="font-medium">Resource:</span> {errorDetails.resource}
+                                      </p>
+                                    )}
+                                    {errorDetails.reason && (
+                                      <p>
+                                        <span className="font-medium">Reason:</span> {errorDetails.reason}
+                                      </p>
+                                    )}
+                                    {errorDetails.suggestion && (
+                                      <p className="mt-2 text-sm text-foreground italic">
+                                        Suggestion: {errorDetails.suggestion}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                                {!canRetry && deployment.retryCount >= deployment.maxRetries && (
+                                  <p className="mt-2 text-xs text-danger">
+                                    Maximum retry attempts ({deployment.maxRetries}) reached
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -1,11 +1,150 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { Prisma } from "@prisma/client";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
 
 // Use orgProtectedProcedure for all deployment operations (requires organization)
 const protectedProcedure = orgProtectedProcedure;
 
 export const deploymentRouter = createTRPCRouter({
+  // List all recent deployments across all policies (for dashboard)
+  listAll: protectedProcedure
+    .input(
+      z.object({
+        status: z.enum(["PENDING", "IN_PROGRESS", "SUCCEEDED", "FAILED", "ROLLED_BACK"]).optional(),
+        clusterId: z.string().optional(),
+        limit: z.number().min(1).max(100).default(50),
+        cursor: z.string().optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { status, clusterId, limit, cursor } = input;
+
+      // Build where clause
+      const where = {
+        policy: {
+          organizationId: ctx.organizationId,
+        },
+        ...(status && { status }),
+        ...(clusterId && { clusterId }),
+      };
+
+      const deployments = await ctx.db.policyDeployment.findMany({
+        where,
+        take: limit + 1,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+        orderBy: { requestedAt: "desc" },
+        include: {
+          policy: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
+          },
+          version: {
+            select: {
+              id: true,
+              version: true,
+            },
+          },
+          cluster: {
+            select: {
+              id: true,
+              name: true,
+              provider: true,
+            },
+          },
+          deployedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      let nextCursor: string | undefined = undefined;
+      if (deployments.length > limit) {
+        const nextItem = deployments.pop();
+        nextCursor = nextItem?.id;
+      }
+
+      return {
+        deployments,
+        nextCursor,
+      };
+    }),
+
+  // Get deployment stats across all policies (for dashboard)
+  getStats: protectedProcedure.query(async ({ ctx }) => {
+    const [total, succeeded, failed, pending, inProgress, rolledBack, recentActivity] =
+      await Promise.all([
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId } },
+        }),
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId }, status: "SUCCEEDED" },
+        }),
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId }, status: "FAILED" },
+        }),
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId }, status: "PENDING" },
+        }),
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId }, status: "IN_PROGRESS" },
+        }),
+        ctx.db.policyDeployment.count({
+          where: { policy: { organizationId: ctx.organizationId }, status: "ROLLED_BACK" },
+        }),
+        // Count deployments in last 24 hours
+        ctx.db.policyDeployment.count({
+          where: {
+            policy: { organizationId: ctx.organizationId },
+            requestedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          },
+        }),
+      ]);
+
+    // Get active deployments (pending or in progress)
+    const activeDeployments = await ctx.db.policyDeployment.findMany({
+      where: {
+        policy: { organizationId: ctx.organizationId },
+        status: { in: ["PENDING", "IN_PROGRESS"] },
+      },
+      take: 5,
+      orderBy: { requestedAt: "desc" },
+      include: {
+        policy: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        cluster: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return {
+      total,
+      succeeded,
+      failed,
+      pending,
+      inProgress,
+      rolledBack,
+      recentActivity,
+      activeDeployments,
+      successRate: total > 0 ? Math.round((succeeded / total) * 100) : 0,
+    };
+  }),
+
   // List deployments for a policy
   listByPolicy: protectedProcedure
     .input(
@@ -320,6 +459,143 @@ export const deploymentRouter = createTRPCRouter({
       });
 
       return rollbackDeployment;
+    }),
+
+  // Retry a failed deployment
+  retry: protectedProcedure
+    .input(z.object({ deploymentId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Get the failed deployment
+      const deployment = await ctx.db.policyDeployment.findFirst({
+        where: { id: input.deploymentId },
+        include: {
+          policy: {
+            select: {
+              id: true,
+              organizationId: true,
+              clusterId: true,
+            },
+          },
+          version: true,
+        },
+      });
+
+      if (!deployment) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Deployment not found",
+        });
+      }
+
+      // Verify organization access
+      if (deployment.policy.organizationId !== ctx.organizationId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Deployment not found",
+        });
+      }
+
+      // Only failed deployments can be retried
+      if (deployment.status !== "FAILED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Only failed deployments can be retried",
+        });
+      }
+
+      // Check retry limit
+      if (deployment.retryCount >= deployment.maxRetries) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Maximum retry attempts (${deployment.maxRetries}) reached`,
+        });
+      }
+
+      // Update deployment status to pending and increment retry count
+      const updatedDeployment = await ctx.db.policyDeployment.update({
+        where: { id: input.deploymentId },
+        data: {
+          status: "PENDING",
+          retryCount: { increment: 1 },
+          lastRetryAt: new Date(),
+          errorMessage: null,
+          errorDetails: Prisma.DbNull,
+          startedAt: null,
+          completedAt: null,
+        },
+        include: {
+          version: {
+            select: {
+              id: true,
+              version: true,
+            },
+          },
+          cluster: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      // Update policy status to pending
+      await ctx.db.policy.update({
+        where: { id: deployment.policy.id },
+        data: { status: "PENDING" },
+      });
+
+      return updatedDeployment;
+    }),
+
+  // Get active deployment status for a policy (for polling)
+  getActiveDeployment: protectedProcedure
+    .input(z.object({ policyId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      // Verify policy belongs to organization
+      const policy = await ctx.db.policy.findFirst({
+        where: {
+          id: input.policyId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!policy) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      // Find any active deployment (PENDING or IN_PROGRESS)
+      const activeDeployment = await ctx.db.policyDeployment.findFirst({
+        where: {
+          policyId: input.policyId,
+          status: { in: ["PENDING", "IN_PROGRESS"] },
+        },
+        orderBy: { requestedAt: "desc" },
+        include: {
+          version: {
+            select: {
+              id: true,
+              version: true,
+            },
+          },
+          deployedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      return {
+        hasActiveDeployment: !!activeDeployment,
+        deployment: activeDeployment,
+        policyStatus: policy.status,
+      };
     }),
 
   // Get deployment history summary for a policy

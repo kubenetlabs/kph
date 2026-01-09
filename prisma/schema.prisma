@@ -333,6 +333,11 @@ model PolicyDeployment {
   errorMessage  String?  @db.Text
   errorDetails  Json?
 
+  // Retry tracking
+  retryCount    Int      @default(0)
+  maxRetries    Int      @default(3)
+  lastRetryAt   DateTime?
+
   // Timestamps
   requestedAt   DateTime @default(now())
   startedAt     DateTime?

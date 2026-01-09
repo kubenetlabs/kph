@@ -4,12 +4,13 @@ This document provides an overview of the Kubernetes Policy Hub project for AI a
 
 ## Project Overview
 
-Kubernetes Policy Hub is a SaaS platform for managing Cilium network policies across multiple Kubernetes clusters. It provides:
+Kubernetes Policy Hub is a SaaS platform for managing Cilium network policies, Tetragon Policies, and GW API Routes (specifically in the form of Nginx Gateway Fabric) across multiple Kubernetes clusters. It provides:
 
 - **Policy Management**: Create, version, and deploy CiliumNetworkPolicy resources
 - **Time-Travel Simulation**: Test policies against historical network traffic before deployment
 - **Telemetry Collection**: eBPF-based flow and process event collection via Hubble and Tetragon
-- **Multi-Cluster Support**: Manage policies across multiple EKS/GKE/AKS clusters from a single dashboard
+- **Policy Marketplace**: the ability to compose and consume packages of polices for both common architectural topolgies like API Gateway and Database Isolation as well as for compliance purposes
+- **Multi-Cluster Support**: Manage policies across multiple EKS/GKE/AKS and bare metal kubernetes clusters from a single dashboard
 
 ## Repository Structure
 
@@ -128,8 +129,50 @@ Cilium returns labels with prefixes (`k8s:app=nginx`), but policy YAML uses bare
 - Server components by default, `"use client"` when needed
 
 ### Testing
-- Go: `go test ./...` with table-driven tests
-- Sequential test execution recommended: `go test ./... -p 1`
+
+#### TypeScript (SaaS) - Vitest
+- **Framework**: Vitest with React Testing Library
+- **Configuration**: `vitest.config.ts`
+- **Test files**: `src/**/*.{test,spec}.{ts,tsx}`
+- **Setup file**: `src/test/setup.ts` (mocks for Next.js router, Clerk auth)
+- **Database mocking**: `src/test/db-mock.ts` (Prisma mock utilities + factories)
+
+**Commands**:
+```bash
+npm run test           # Run tests in watch mode
+npm run test:run       # Run tests once
+npm run test:coverage  # Run tests with coverage report
+npm run test:ui        # Open Vitest UI
+```
+
+**Test utilities**:
+- `createMockPrismaClient()` - Creates a fully mocked Prisma client
+- `factories.*` - Factory functions for test data (organization, user, cluster, policy, etc.)
+- `setupMockReturns()` - Helper to configure mock return values
+
+**Example test**:
+```typescript
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createMockPrismaClient, factories } from "~/test/db-mock";
+
+const mockDb = createMockPrismaClient();
+vi.mock("~/lib/db", () => ({ db: mockDb }));
+
+describe("Feature", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("should do something", () => {
+    const policy = factories.policy({ status: "DEPLOYED" });
+    mockDb.policy.findFirst.mockResolvedValue(policy);
+    // ... test logic
+  });
+});
+```
+
+#### Go (Operator)
+- **Framework**: Standard Go testing
+- **Command**: `go test ./...` with table-driven tests
+- **Sequential execution recommended**: `go test ./... -p 1` (avoids memory pressure)
 
 ## Current Implementation State
 
@@ -153,9 +196,16 @@ Cilium returns labels with prefixes (`k8s:app=nginx`), but policy YAML uses bare
 - [x] Authentication (Clerk with OAuth + Email)
 - [x] Multi-tenancy (Organization-based data isolation)
 - [x] Onboarding flow
+- [x] Policy deployment workflow:
+  - [x] Operator polling loop (fetch PENDING policies, deploy, report status)
+  - [x] IN_PROGRESS state handling in operator and SaaS
+  - [x] UI status polling with deployment progress feedback
+  - [x] Deployment dashboard page (`/deployments`)
+  - [x] Error handling and retry logic (with max retry limits)
+- [x] Vitest test framework setup
 
 ### In Progress
-- [ ] Policy deployment workflow (deploy from SaaS UI to cluster)
+- [ ] Integration tests for deployment workflow
 
 ### Planned
 - [ ] Gateway API CRUD support (HTTPRoute, GRPCRoute, TCPRoute, TLSRoute)
@@ -173,8 +223,15 @@ Cilium returns labels with prefixes (`k8s:app=nginx`), but policy YAML uses bare
 | `operator/internal/telemetry/storage/manager.go` | Storage lifecycle management |
 | `operator/internal/telemetry/simulation/engine.go` | Policy simulation logic |
 | `operator/internal/telemetry/models/event.go` | Unified TelemetryEvent type |
-| `src/server/api/routers/` | tRPC API routers |
+| `operator/internal/sync/reconciler.go` | Policy deployment reconciliation |
+| `src/server/routers/` | tRPC API routers |
+| `src/server/routers/deployment.ts` | Deployment tRPC router (deploy, retry, rollback) |
+| `src/app/api/operator/policies/[id]/status/route.ts` | Operator status update endpoint |
+| `src/app/deployments/page.tsx` | Deployment dashboard page |
 | `prisma/schema.prisma` | Database schema |
+| `vitest.config.ts` | Vitest test configuration |
+| `src/test/setup.ts` | Test setup (mocks for Next.js, Clerk) |
+| `src/test/db-mock.ts` | Prisma mock utilities and test factories |
 
 ## Running Locally
 
