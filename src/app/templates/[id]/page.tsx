@@ -119,6 +119,7 @@ export default function TemplateDetailPage() {
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
   if (error || !template) {
     return (
       <AppShell>

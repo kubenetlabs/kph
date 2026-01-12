@@ -321,7 +321,7 @@ export default function NewTemplatePage() {
                   record with independent status tracking.
                 </p>
                 <p>
-                  Template changes don't auto-propagate - you must manually
+                  Template changes do not auto-propagate - you must manually
                   sync to update cluster policies.
                 </p>
               </CardContent>
