@@ -59,8 +59,8 @@ export default function GatewayAPIStatusPage() {
     setSelectedClusterId(clusterList[0].id);
   }
 
-  // Fetch validation status
-  const { data, isLoading, refetch } = trpc.gatewayApi.getValidationStatus.useQuery(
+  // Fetch validation status (now uses the consolidated policy router)
+  const { data, isLoading, refetch } = trpc.policy.getGatewayValidationStatus.useQuery(
     { clusterId: selectedClusterId },
     { enabled: !!selectedClusterId, refetchInterval: 30000 }
   );
