@@ -149,15 +149,10 @@ make generate && make build
 - [x] Vitest test framework (87 tests passing)
 - [x] Policy Pack Marketplace (browse, install, deploy, admin UI)
 - [x] Multi-cluster policy sync (Policy Templates with manual sync to clusters)
+- [x] Adaptive Recommendations (coverage gaps, unused policies, consolidation suggestions)
 
 ### In Progress
 - [ ] Integration tests for deployment workflow
-
-### Adaptive Recommendations (V2)
-Traffic-informed policy suggestions:
-- Coverage gap detection (flows with NO_POLICY)
-- Unused rule identification
-- Policy consolidation suggestions
 
 ### Expanded Policy Types (V2+)
 | Phase | Policy Type | Description |
