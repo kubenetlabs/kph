@@ -20,6 +20,9 @@ export interface MockPrismaClient {
   policy: MockPrismaModel;
   policyVersion: MockPrismaModel;
   policyDeployment: MockPrismaModel;
+  policyTemplate: MockPrismaModel;
+  policyTemplateVersion: MockPrismaModel;
+  templateSyncOperation: MockPrismaModel;
   cluster: MockPrismaModel;
   organization: MockPrismaModel;
   user: MockPrismaModel;
@@ -48,6 +51,9 @@ export function createMockPrismaClient(): MockPrismaClient {
     policy: mockMethods(),
     policyVersion: mockMethods(),
     policyDeployment: mockMethods(),
+    policyTemplate: mockMethods(),
+    policyTemplateVersion: mockMethods(),
+    templateSyncOperation: mockMethods(),
     cluster: mockMethods(),
     organization: mockMethods(),
     user: mockMethods(),
@@ -148,6 +154,70 @@ spec:
     resourceNamespace: null,
     lastRetryAt: null,
     previousDeploymentId: null,
+    ...overrides,
+  }),
+
+  policyTemplate: (overrides = {}) => ({
+    id: "template-1",
+    name: "test-template",
+    description: "Test template for multi-cluster sync",
+    type: "CILIUM_NETWORK" as const,
+    content: `apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-template
+spec:
+  endpointSelector:
+    matchLabels:
+      app: test
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: frontend`,
+    defaultTargetNamespaces: [],
+    defaultTargetLabels: null,
+    currentVersion: 1,
+    organizationId: "org-1",
+    createdById: "user-1",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  }),
+
+  policyTemplateVersion: (overrides = {}) => ({
+    id: "template-version-1",
+    templateId: "template-1",
+    version: 1,
+    content: `apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: test-template
+spec:
+  endpointSelector:
+    matchLabels:
+      app: test
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: frontend`,
+    changelog: "Initial version",
+    createdAt: new Date(),
+    ...overrides,
+  }),
+
+  templateSyncOperation: (overrides = {}) => ({
+    id: "sync-op-1",
+    templateId: "template-1",
+    templateVersion: 1,
+    targetClusterIds: ["cluster-1"],
+    status: "COMPLETED" as const,
+    policiesCreated: 1,
+    policiesUpdated: 0,
+    policiesFailed: 0,
+    errorDetails: null,
+    triggeredById: "user-1",
+    createdAt: new Date(),
+    completedAt: new Date(),
     ...overrides,
   }),
 };

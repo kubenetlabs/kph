@@ -22,11 +22,12 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  users       User[]
-  clusters    Cluster[]
-  policies    Policy[]
-  simulations Simulation[]
-  apiTokens   ApiToken[]
+  users           User[]
+  clusters        Cluster[]
+  policies        Policy[]
+  policyTemplates PolicyTemplate[]
+  simulations     Simulation[]
+  apiTokens       ApiToken[]
   packInstallations PolicyPackInstallation[]
   createdPacks      PolicyPack[] @relation("OrgCreatedPacks")
   subscription Subscription?
@@ -53,10 +54,12 @@ model User {
   sessions Session[]
 
   // Activity tracking
-  policiesCreated  Policy[]     @relation("PolicyCreator")
-  simulationsRun   Simulation[] @relation("SimulationRunner")
+  policiesCreated      Policy[]     @relation("PolicyCreator")
+  simulationsRun       Simulation[] @relation("SimulationRunner")
   deploymentsTriggered PolicyDeployment[] @relation("DeploymentActor")
-  packInstallations PolicyPackInstallation[] @relation("PackInstaller")
+  packInstallations    PolicyPackInstallation[] @relation("PackInstaller")
+  templatesCreated     PolicyTemplate[] @relation("TemplateCreator")
+  syncOperations       TemplateSyncOperation[] @relation("SyncTrigger")
 
   @@map("users")
 }
@@ -234,6 +237,11 @@ model Policy {
   clusterId String
   cluster   Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
+  // Template association (optional - for multi-cluster sync)
+  templateId        String?
+  template          PolicyTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  syncedFromVersion Int? // Which template version this policy was synced from
+
   // Creator tracking
   createdById String
   createdBy   User @relation("PolicyCreator", fields: [createdById], references: [id])
@@ -244,6 +252,7 @@ model Policy {
   deployments PolicyDeployment[]
 
   @@unique([clusterId, name])
+  @@index([templateId])
   @@map("policies")
 }
 
@@ -348,6 +357,97 @@ enum DeploymentStatus {
   SUCCEEDED   // Successfully deployed
   FAILED      // Deployment failed
   ROLLED_BACK // Was rolled back
+}
+
+// ============================================================================
+// POLICY TEMPLATES (Multi-Cluster Sync)
+// ============================================================================
+
+model PolicyTemplate {
+  id                      String   @id @default(cuid())
+  name                    String
+  description             String?
+  type                    PolicyType
+  content                 String   @db.Text
+
+  // Default targeting (can be overridden per-cluster during sync)
+  defaultTargetNamespaces String[]
+  defaultTargetLabels     Json?
+
+  // Versioning
+  currentVersion Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenancy (org-level, no clusterId)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Creator tracking
+  createdById String
+  createdBy   User @relation("TemplateCreator", fields: [createdById], references: [id])
+
+  // Relationships
+  versions       PolicyTemplateVersion[]
+  policies       Policy[]                // Policies instantiated from this template
+  syncOperations TemplateSyncOperation[] // History of sync operations
+
+  @@unique([organizationId, name])
+  @@map("policy_templates")
+}
+
+model PolicyTemplateVersion {
+  id        String   @id @default(cuid())
+  version   Int
+  content   String   @db.Text
+  changelog String?
+  createdAt DateTime @default(now())
+
+  // Parent template
+  templateId String
+  template   PolicyTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@map("policy_template_versions")
+}
+
+// Track sync operations for audit trail
+model TemplateSyncOperation {
+  id         String         @id @default(cuid())
+  templateId String
+  template   PolicyTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  // Which version was synced
+  templateVersion Int
+
+  // Which clusters were targeted
+  targetClusterIds String[]
+
+  // Results
+  status          SyncOperationStatus @default(PENDING)
+  policiesCreated Int                 @default(0)
+  policiesUpdated Int                 @default(0)
+  policiesFailed  Int                 @default(0)
+  errorDetails    Json? // Array of {clusterId, error} for failures
+
+  // Who triggered
+  triggeredById String
+  triggeredBy   User @relation("SyncTrigger", fields: [triggeredById], references: [id])
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([templateId, createdAt])
+  @@map("template_sync_operations")
+}
+
+enum SyncOperationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
 }
 
 // ============================================================================

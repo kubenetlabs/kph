@@ -125,6 +125,8 @@ make generate && make build
 | `prisma/schema.prisma` | Database schema (source of truth) |
 | `src/server/routers/policy.ts` | Policy CRUD + Gateway API validation |
 | `src/server/routers/deployment.ts` | Deployment workflow (deploy, retry, rollback) |
+| `src/server/routers/marketplace.ts` | Policy pack marketplace (browse, install, deploy) |
+| `src/server/routers/template.ts` | Policy templates (multi-cluster sync) |
 | `src/lib/gateway-api-validator.ts` | Gateway API YAML parsing/validation |
 | `src/app/api/operator/policies/` | Operator policy fetch/status endpoints |
 | `src/components/topology/` | React Flow topology map |
@@ -145,22 +147,11 @@ make generate && make build
 - [x] Authentication (Clerk) and multi-tenancy
 - [x] Onboarding flow
 - [x] Vitest test framework (87 tests passing)
+- [x] Policy Pack Marketplace (browse, install, deploy, admin UI)
+- [x] Multi-cluster policy sync (Policy Templates with manual sync to clusters)
 
 ### In Progress
 - [ ] Integration tests for deployment workflow
-
-### Planned (V1)
-- [ ] Policy Pack Marketplace UI and installation flow
-- [ ] Multi-cluster policy sync
-
-## Planned Features
-
-### Policy Pack Marketplace (V1)
-Pre-built policy bundles with two tiers:
-- **Community** (Free): Microservices baseline, database isolation, API gateway patterns
-- **Enterprise** (Paid): SOC2, DORA, PCI-DSS, CIS compliance packs with auditor certification
-
-Schema exists in `prisma/schema.prisma` (PolicyPack, PolicyPackItem, PolicyPackInstallation, PolicyPackDeployment).
 
 ### Adaptive Recommendations (V2)
 Traffic-informed policy suggestions:
