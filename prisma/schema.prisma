@@ -160,7 +160,6 @@ model Cluster {
   validationSummaries ValidationSummary[]
   validationEvents    ValidationEvent[]
   packDeployments     PolicyPackDeployment[]
-  gatewayApiPolicies  GatewayAPIPolicy[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -258,15 +257,6 @@ enum PolicyType {
   GATEWAY_TLSROUTE   // TLSRoute
 }
 
-enum GatewayAPIKind {
-  HTTPRoute
-  GRPCRoute
-  TCPRoute
-  TLSRoute
-  Gateway
-  ReferenceGrant
-}
-
 enum PolicyStatus {
   DRAFT      // Not yet deployed
   SIMULATING // Running in simulation
@@ -358,44 +348,6 @@ enum DeploymentStatus {
   SUCCEEDED   // Successfully deployed
   FAILED      // Deployment failed
   ROLLED_BACK // Was rolled back
-}
-
-// ============================================================================
-// GATEWAY API POLICIES
-// ============================================================================
-
-model GatewayAPIPolicy {
-  id          String   @id @default(cuid())
-  clusterId   String
-  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-
-  // Resource identity
-  kind        GatewayAPIKind
-  name        String
-  namespace   String
-
-  // Raw YAML
-  yamlContent String   @db.Text
-
-  // Parsed for querying
-  parentRefs  Json     // Gateway references
-  hostnames   Json?    // Hostname list
-  rules       Json     // Parsed rules for matching
-
-  // Status
-  status      PolicyStatus @default(DEPLOYED)
-  syncedAt    DateTime?
-
-  // Metadata
-  labels      Json?
-  annotations Json?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([clusterId, kind, namespace, name])
-  @@index([clusterId, kind])
-  @@map("gateway_api_policies")
 }
 
 // ============================================================================

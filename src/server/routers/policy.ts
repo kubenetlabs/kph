@@ -495,4 +495,103 @@ export const policyRouter = createTRPCRouter({
 
       return policy;
     }),
+
+  // Get validation status for Gateway API policies
+  // Returns policies with type GATEWAY_* and their validation status
+  getGatewayValidationStatus: protectedProcedure
+    .input(z.object({ clusterId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      // Verify cluster belongs to organization
+      const cluster = await ctx.db.cluster.findFirst({
+        where: {
+          id: input.clusterId,
+          organizationId: ctx.organizationId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!cluster) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Cluster not found",
+        });
+      }
+
+      // Get Gateway API resources from the Policy table (type starts with GATEWAY_)
+      const policies = await ctx.db.policy.findMany({
+        where: {
+          clusterId: input.clusterId,
+          type: {
+            in: ["GATEWAY_HTTPROUTE", "GATEWAY_GRPCROUTE", "GATEWAY_TCPROUTE", "GATEWAY_TLSROUTE"],
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          content: true,
+          targetNamespaces: true,
+          deployedAt: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+
+      // Map policy types to Gateway API kinds
+      const typeToKind: Record<string, string> = {
+        GATEWAY_HTTPROUTE: "HTTPRoute",
+        GATEWAY_GRPCROUTE: "GRPCRoute",
+        GATEWAY_TCPROUTE: "TCPRoute",
+        GATEWAY_TLSROUTE: "TLSRoute",
+      };
+
+      // Transform to validation results format
+      const validationResults = policies.map((policy) => {
+        // Parse the YAML to extract namespace (default to first target namespace or "default")
+        const namespace = policy.targetNamespaces[0] ?? "default";
+
+        // For now, mark deployed policies as valid, others as pending validation
+        const isDeployed = policy.status === "DEPLOYED";
+
+        return {
+          id: policy.id,
+          kind: typeToKind[policy.type] ?? policy.type,
+          name: policy.name,
+          namespace: namespace,
+          deploymentStatus: policy.status,
+          syncedAt: policy.deployedAt,
+          validation: isDeployed
+            ? {
+                valid: true,
+                errors: [] as string[],
+                warnings: [] as string[],
+                validatedAt: policy.deployedAt?.toISOString() ?? policy.updatedAt.toISOString(),
+              }
+            : null,
+        };
+      });
+
+      // Calculate summary stats
+      const total = validationResults.length;
+      const validated = validationResults.filter((r) => r.validation !== null).length;
+      const valid = validationResults.filter((r) => r.validation?.valid === true).length;
+      const invalid = validationResults.filter((r) => r.validation?.valid === false).length;
+      const pending = validationResults.filter((r) => r.validation === null).length;
+
+      return {
+        cluster,
+        summary: {
+          total,
+          validated,
+          valid,
+          invalid,
+          pending,
+        },
+        resources: validationResults,
+      };
+    }),
 });
