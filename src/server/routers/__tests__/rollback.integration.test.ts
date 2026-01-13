@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /**
  * Rollback Integration Tests
  *
@@ -14,7 +16,6 @@ import {
   createStatefulMockPrisma,
   setupTestScenario,
   createDeployablePolicy,
-  createTestDeployment,
   createOperatorRequest,
   resetIdCounter,
   testFactories,
@@ -488,7 +489,7 @@ describe("Rollback Integration Tests", () => {
         v => v.policyId === policy.id && v.version === 1
       );
 
-      const rollbackDeployment = testFactories.policyDeployment(store, {
+      testFactories.policyDeployment(store, {
         policyId: policy.id,
         versionId: version1!.id,
         clusterId: scenario.cluster.id,

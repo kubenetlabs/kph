@@ -301,10 +301,11 @@ spec:
   },
 
   apiToken: (store: TestDatabaseStore, overrides: Partial<TestApiToken> & { rawToken?: string } = {}): TestApiToken & { rawToken: string } => {
-    const rawToken = overrides.rawToken || `phub_${crypto.randomBytes(32).toString("base64url")}`;
+    const rawToken = overrides.rawToken ?? `phub_${crypto.randomBytes(32).toString("base64url")}`;
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 
     // Build token object - tokenHash must be computed from rawToken, not from overrides
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { tokenHash: _ignoredTokenHash, ...safeOverrides } = overrides;
     const token: TestApiToken = {
       id: generateId("token"),
@@ -337,16 +338,16 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
   return {
     organization: {
       findFirst: vi.fn().mockImplementation(({ where }: { where?: { id?: string; slug?: string } }) => {
-        if (where?.id) return store.organizations.get(where.id) || null;
+        if (where?.id) return store.organizations.get(where.id) ?? null;
         if (where?.slug) {
-          return Array.from(store.organizations.values()).find(o => o.slug === where.slug) || null;
+          return Array.from(store.organizations.values()).find(o => o.slug === where.slug) ?? null;
         }
-        return Array.from(store.organizations.values())[0] || null;
+        return Array.from(store.organizations.values())[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id?: string; slug?: string } }) => {
-        if (where.id) return store.organizations.get(where.id) || null;
+        if (where.id) return store.organizations.get(where.id) ?? null;
         if (where.slug) {
-          return Array.from(store.organizations.values()).find(o => o.slug === where.slug) || null;
+          return Array.from(store.organizations.values()).find(o => o.slug === where.slug) ?? null;
         }
         return null;
       }),
@@ -354,16 +355,16 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
 
     user: {
       findFirst: vi.fn().mockImplementation(({ where }: { where?: { id?: string; email?: string } }) => {
-        if (where?.id) return store.users.get(where.id) || null;
+        if (where?.id) return store.users.get(where.id) ?? null;
         if (where?.email) {
-          return Array.from(store.users.values()).find(u => u.email === where.email) || null;
+          return Array.from(store.users.values()).find(u => u.email === where.email) ?? null;
         }
-        return Array.from(store.users.values())[0] || null;
+        return Array.from(store.users.values())[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id?: string; email?: string } }) => {
-        if (where.id) return store.users.get(where.id) || null;
+        if (where.id) return store.users.get(where.id) ?? null;
         if (where.email) {
-          return Array.from(store.users.values()).find(u => u.email === where.email) || null;
+          return Array.from(store.users.values()).find(u => u.email === where.email) ?? null;
         }
         return null;
       }),
@@ -371,15 +372,15 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
 
     cluster: {
       findFirst: vi.fn().mockImplementation(({ where }: { where?: { id?: string; organizationId?: string } }) => {
-        if (where?.id) return store.clusters.get(where.id) || null;
+        if (where?.id) return store.clusters.get(where.id) ?? null;
         const clusters = Array.from(store.clusters.values());
         if (where?.organizationId) {
-          return clusters.find(c => c.organizationId === where.organizationId) || null;
+          return clusters.find(c => c.organizationId === where.organizationId) ?? null;
         }
-        return clusters[0] || null;
+        return clusters[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
-        return store.clusters.get(where.id) || null;
+        return store.clusters.get(where.id) ?? null;
       }),
       update: vi.fn().mockImplementation(({ where, data }: { where: { id: string }; data: Partial<TestCluster> }) => {
         const cluster = store.clusters.get(where.id);
@@ -394,16 +395,16 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
       findFirst: vi.fn().mockImplementation(({ where }: { where?: { id?: string; clusterId?: string; status?: { in?: string[] } } }) => {
         const policies = Array.from(store.policies.values());
         if (where?.id && where?.clusterId) {
-          return policies.find(p => p.id === where.id && p.clusterId === where.clusterId) || null;
+          return policies.find(p => p.id === where.id && p.clusterId === where.clusterId) ?? null;
         }
-        if (where?.id) return store.policies.get(where.id) || null;
+        if (where?.id) return store.policies.get(where.id) ?? null;
         if (where?.clusterId) {
-          return policies.find(p => p.clusterId === where.clusterId) || null;
+          return policies.find(p => p.clusterId === where.clusterId) ?? null;
         }
-        return policies[0] || null;
+        return policies[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
-        return store.policies.get(where.id) || null;
+        return store.policies.get(where.id) ?? null;
       }),
       findMany: vi.fn().mockImplementation(({ where }: { where?: { clusterId?: string; status?: { in?: string[] } } } = {}) => {
         let policies = Array.from(store.policies.values());
@@ -435,15 +436,15 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
           versions = versions.filter(v => v.policyId === where.policyId);
         }
         if (where?.id) {
-          return store.policyVersions.get(where.id) || null;
+          return store.policyVersions.get(where.id) ?? null;
         }
         if (orderBy?.version === "desc") {
           versions.sort((a, b) => b.version - a.version);
         }
-        return versions[0] || null;
+        return versions[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
-        return store.policyVersions.get(where.id) || null;
+        return store.policyVersions.get(where.id) ?? null;
       }),
     },
 
@@ -454,20 +455,21 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
           deployments = deployments.filter(d => d.policyId === where.policyId);
         }
         if (where?.id) {
-          return store.policyDeployments.get(where.id) || null;
+          return store.policyDeployments.get(where.id) ?? null;
         }
         if (typeof where?.status === "string") {
           deployments = deployments.filter(d => d.status === where.status);
-        } else if (where?.status?.in) {
-          deployments = deployments.filter(d => where.status!.in!.includes(d.status));
+        } else if (where?.status && typeof where.status === "object" && "in" in where.status && where.status.in) {
+          const statusList = where.status.in;
+          deployments = deployments.filter(d => statusList.includes(d.status));
         }
         if (orderBy?.requestedAt === "desc") {
           deployments.sort((a, b) => b.requestedAt.getTime() - a.requestedAt.getTime());
         }
-        return deployments[0] || null;
+        return deployments[0] ?? null;
       }),
       findUnique: vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
-        return store.policyDeployments.get(where.id) || null;
+        return store.policyDeployments.get(where.id) ?? null;
       }),
       findMany: vi.fn().mockImplementation(({ where }: { where?: { policyId?: string; status?: { in?: string[] } } } = {}) => {
         let deployments = Array.from(store.policyDeployments.values());
@@ -524,11 +526,11 @@ export function createStatefulMockPrisma(store: TestDatabaseStore) {
       create: vi.fn().mockImplementation(({ data }: { data: Partial<TestAuditLog> }) => {
         const log: TestAuditLog = {
           id: generateId("audit"),
-          action: data.action || "",
-          resource: data.resource || "",
-          resourceId: data.resourceId || null,
-          details: data.details || null,
-          organizationId: data.organizationId || "",
+          action: data.action ?? "",
+          resource: data.resource ?? "",
+          resourceId: data.resourceId ?? null,
+          details: data.details ?? null,
+          organizationId: data.organizationId ?? "",
           timestamp: new Date(),
         };
         store.auditLogs.push(log);
@@ -555,17 +557,17 @@ export function createTestRequest(
 ): NextRequest {
   const { method = "GET", body, headers = {} } = options;
 
-  const init: RequestInit = {
-    method,
-    headers: new Headers(headers),
-  };
+  const requestHeaders = new Headers(headers);
 
   if (body !== undefined) {
-    init.body = JSON.stringify(body);
-    (init.headers as Headers).set("Content-Type", "application/json");
+    requestHeaders.set("Content-Type", "application/json");
   }
 
-  return new NextRequest(new URL(url, "http://localhost:3000"), init);
+  return new NextRequest(new URL(url, "http://localhost:3000"), {
+    method,
+    headers: requestHeaders,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 }
 
 /**
