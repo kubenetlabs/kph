@@ -1,0 +1,115 @@
+# OpenWebUI Frontend Deployment
+# User-facing interface for LLM interactions
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-data
+  namespace: llm-frontend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: llm-frontend
+  labels:
+    app: openwebui
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+        component: frontend
+        security.kph.io/tier: frontend
+        security.kph.io/data-sensitivity: medium
+        security.kph.io/user-facing: "true"
+    spec:
+      containers:
+        - name: openwebui
+          image: ghcr.io/open-webui/open-webui:main
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # Connect to Ollama in the llm-system namespace
+            - name: OLLAMA_BASE_URL
+              value: "http://ollama.llm-system.svc.cluster.local:11434"
+            # Use default embedded ChromaDB (no external DB needed)
+            - name: DATA_DIR
+              value: "/app/backend/data"
+            # Security settings
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openwebui-secrets
+                  key: secret-key
+            # Disable Direct Connections by default (CVE-2025-64496 mitigation)
+            - name: ENABLE_DIRECT_CONNECTIONS
+              value: "false"
+            # Allow signup for demo
+            - name: ENABLE_SIGNUP
+              value: "true"
+            - name: DEFAULT_USER_ROLE
+              value: "user"
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openwebui-data
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openwebui-secrets
+  namespace: llm-frontend
+type: Opaque
+stringData:
+  secret-key: "CHANGE_ME_GENERATE_SECURE_KEY_WITH_OPENSSL"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: llm-frontend
+  labels:
+    app: openwebui
+spec:
+  selector:
+    app: openwebui
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  type: ClusterIP

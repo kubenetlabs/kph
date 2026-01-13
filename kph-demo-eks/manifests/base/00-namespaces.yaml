@@ -1,0 +1,17 @@
+# Namespaces for KPH LLM Security Demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-system
+  labels:
+    app.kubernetes.io/part-of: kph-demo
+    purpose: llm-inference
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-frontend
+  labels:
+    app.kubernetes.io/part-of: kph-demo
+    purpose: user-interface

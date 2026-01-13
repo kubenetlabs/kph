@@ -55,7 +55,7 @@ export default function TopologyPage() {
 
   return (
     <AppShell>
-      <div className="min-h-[calc(100vh-120px)] flex flex-col">
+      <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 120px)' }}>
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div>
@@ -191,7 +191,7 @@ export default function TopologyPage() {
         </div>
 
         {/* Map area */}
-        <div className="flex-1 relative rounded-lg border border-border overflow-hidden">
+        <div className="h-[500px] relative rounded-lg border border-border overflow-hidden">
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-20">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

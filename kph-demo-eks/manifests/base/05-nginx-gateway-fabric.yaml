@@ -1,0 +1,131 @@
+# =============================================================================
+# NGINX Gateway Fabric Installation
+# =============================================================================
+# This installs NGF using Gateway API for ingress into the LLM stack
+#
+# NGF provides:
+# - L7 traffic management
+# - TLS termination
+# - Rate limiting
+# - Request filtering
+# =============================================================================
+
+---
+# Gateway API CRDs are required first (installed separately via setup script)
+# This file contains the Gateway and HTTPRoute resources
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-gateway
+  labels:
+    app.kubernetes.io/part-of: kph-demo
+    purpose: ingress
+
+---
+# =============================================================================
+# Gateway Class - Defines NGF as the controller
+# =============================================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: nginx
+spec:
+  controllerName: gateway.nginx.org/nginx-gateway-controller
+
+---
+# =============================================================================
+# Gateway - The actual listener configuration
+# =============================================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: llm-gateway
+  namespace: nginx-gateway
+  labels:
+    app.kubernetes.io/managed-by: kph
+spec:
+  gatewayClassName: nginx
+  listeners:
+    # HTTP listener for OpenWebUI
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+
+---
+# =============================================================================
+# HTTPRoute - Routes traffic to OpenWebUI
+# =============================================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: openwebui-route
+  namespace: llm-frontend
+  labels:
+    app.kubernetes.io/managed-by: kph
+spec:
+  parentRefs:
+    - name: llm-gateway
+      namespace: nginx-gateway
+      sectionName: http
+  hostnames:
+    - "chat.llm.local"
+    - "openwebui.llm.local"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: openwebui
+          port: 8080
+          weight: 100
+
+---
+# =============================================================================
+# HTTPRoute - Health check endpoint (no auth required)
+# =============================================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: health-route
+  namespace: llm-frontend
+  labels:
+    app.kubernetes.io/managed-by: kph
+spec:
+  parentRefs:
+    - name: llm-gateway
+      namespace: nginx-gateway
+      sectionName: http
+  hostnames:
+    - "chat.llm.local"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /health
+      backendRefs:
+        - name: openwebui
+          port: 8080
+
+---
+# =============================================================================
+# Self-signed TLS Secret (for demo purposes)
+# In production, use cert-manager or real certificates
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-tls-secret
+  namespace: nginx-gateway
+type: kubernetes.io/tls
+data:
+  # Placeholder - generate real certs with:
+  # openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  #   -keyout tls.key -out tls.crt -subj "/CN=*.llm.local"
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUNIVENDQWNPZ0F3SUJBZ0lVYjBiN0JyTkNzL1JQNGJQNHNxVVpVUzBxL0VNd0NnWUlLb1pJemowRUF3SXcKWURFTE1Ba0dBMVVFQmhNQ1ZWTXhDekFKQmdOVkJBZ01Ba05CTVJFd0R3WURWUVFIREFoVFlXNGdSbkpoYmpFUgpNQThHQTFVRUNnd0lSalVnUkdWdGJ6RWVNQndHQTFVRUF3d1ZLaTVzYkcwdWJHOWpZV3dnS0VSbGJXOGdRMEVwCk1CNFhEVEkxTURFeE1qQXdNREF3TUZvWERUSTJNREV4TWpBd01EQXdNRm93WURFTE1Ba0dBMVVFQmhNQ1ZWTXgKQ3pBSkJnTlZCQWdNQWtOQk1SRXdEd1lEVlFRSERBaFRZVzRnUm5KaGJqRVJNQThHQTFVRUNnd0lSalVnUkdWdApiekVlTUJ3R0ExVUVBd3dWS2k1c2JHMHViRzlqWVd3Z0tFUmxiVzhnUTBFcE1Ga3dFd1lIS29aSXpqMENBUVlJCktvWkl6ajBEQVFjRFFnQUVYWHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgKeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4S05UTUZFd0hRWURWUjBPQkJZRUZQbGFjZWhvCmxkZXIvZGVtby1jZXJ0LWtleS1pZE1COEdBMVVkSXdRWU1CYUFGUG==
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZ1hYeHh4eHh4eHh4eHh4eHgKeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4aFJBTkNBQVJkZkhISEhISEhISEhISEhISEhISEhISEhISEhICkhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhICi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K

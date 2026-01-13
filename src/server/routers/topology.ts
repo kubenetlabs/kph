@@ -456,6 +456,7 @@ export const topologyRouter = createTRPCRouter({
         namespace: string;
         podName: string;
         processName: string;
+        fullPath: string;
         execCount: number;
         isSuspicious: boolean;
         category: "shell" | "network_tool" | "scripting" | "system" | "normal";
@@ -463,7 +464,9 @@ export const topologyRouter = createTRPCRouter({
       }
 
       const events: ProcessEvent[] = processSummaries.map((ps) => {
-        const processName = ps.processName.toLowerCase();
+        // Extract basename from full path (e.g., /bin/sh -> sh)
+        const fullPath = ps.processName.toLowerCase();
+        const processName = fullPath.split("/").pop() ?? fullPath;
         let category: ProcessEvent["category"] = "normal";
         let isSuspicious = false;
 
@@ -489,7 +492,8 @@ export const topologyRouter = createTRPCRouter({
           timestamp: ps.timestamp,
           namespace: ps.namespace,
           podName: ps.podName,
-          processName: ps.processName,
+          processName: processName, // Return basename for display
+          fullPath: ps.processName, // Keep full path available
           execCount: ps.execCount,
           isSuspicious,
           category,
