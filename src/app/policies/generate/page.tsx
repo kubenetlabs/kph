@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -64,7 +64,7 @@ const tetragonExamplePrompts = [
   "Block privilege escalation attempts (setuid, setgid syscalls) in all pods in the llm-system namespace",
 ];
 
-export default function GeneratePolicyPage() {
+function GeneratePolicyPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [prompt, setPrompt] = useState("");
@@ -615,4 +615,17 @@ function highlightYamlValue(value: string): React.ReactNode {
 
   // Regular value
   return <span className="text-gateway"> {value}</span>;
+}
+
+// Wrap in Suspense for useSearchParams
+export default function GeneratePolicyPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    }>
+      <GeneratePolicyPageContent />
+    </Suspense>
+  );
 }
