@@ -406,4 +406,139 @@ export const topologyRouter = createTRPCRouter({
 
       return Array.from(namespaces).sort();
     }),
+
+  /**
+   * Get recent process events (Tetragon telemetry) for runtime security visibility
+   */
+  getProcessEvents: orgProtectedProcedure
+    .input(
+      z.object({
+        clusterId: z.string(),
+        timeRange: z.enum(["5m", "15m", "1h", "24h"]).default("1h"),
+        namespace: z.string().optional(),
+        suspicious: z.boolean().optional(), // Filter to only suspicious events
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const timeRangeMinutes = {
+        "5m": 5,
+        "15m": 15,
+        "1h": 60,
+        "24h": 1440,
+      }[input.timeRange];
+
+      const since = new Date(Date.now() - timeRangeMinutes * 60 * 1000);
+
+      // Suspicious binaries that might indicate attacks
+      const suspiciousBinaries = [
+        "sh", "bash", "zsh", "dash", "ash", // Shells
+        "curl", "wget", "nc", "netcat", "ncat", // Network tools
+        "python", "python3", "perl", "ruby", // Scripting languages
+        "chmod", "chown", // Permission changes
+        "base64", "xxd", // Encoding tools
+        "nmap", "masscan", // Scanning tools
+      ];
+
+      const processSummaries = await ctx.db.processSummary.findMany({
+        where: {
+          clusterId: input.clusterId,
+          timestamp: { gte: since },
+          ...(input.namespace && { namespace: input.namespace }),
+        },
+        orderBy: { timestamp: "desc" },
+        take: 500,
+      });
+
+      // Aggregate and categorize events
+      interface ProcessEvent {
+        id: string;
+        timestamp: Date;
+        namespace: string;
+        podName: string;
+        processName: string;
+        execCount: number;
+        isSuspicious: boolean;
+        category: "shell" | "network_tool" | "scripting" | "system" | "normal";
+        syscallCounts: Record<string, number> | null;
+      }
+
+      const events: ProcessEvent[] = processSummaries.map((ps) => {
+        const processName = ps.processName.toLowerCase();
+        let category: ProcessEvent["category"] = "normal";
+        let isSuspicious = false;
+
+        // Categorize the process
+        if (["sh", "bash", "zsh", "dash", "ash"].includes(processName)) {
+          category = "shell";
+          isSuspicious = true;
+        } else if (["curl", "wget", "nc", "netcat", "ncat"].includes(processName)) {
+          category = "network_tool";
+          isSuspicious = true;
+        } else if (["python", "python3", "perl", "ruby"].includes(processName)) {
+          category = "scripting";
+          isSuspicious = true;
+        } else if (["chmod", "chown", "base64", "xxd"].includes(processName)) {
+          category = "system";
+          isSuspicious = true;
+        } else if (suspiciousBinaries.includes(processName)) {
+          isSuspicious = true;
+        }
+
+        return {
+          id: ps.id,
+          timestamp: ps.timestamp,
+          namespace: ps.namespace,
+          podName: ps.podName,
+          processName: ps.processName,
+          execCount: ps.execCount,
+          isSuspicious,
+          category,
+          syscallCounts: ps.syscallCounts as Record<string, number> | null,
+        };
+      });
+
+      // Filter to suspicious only if requested
+      const filteredEvents = input.suspicious
+        ? events.filter((e) => e.isSuspicious)
+        : events;
+
+      // Summary stats
+      const summary = {
+        totalEvents: filteredEvents.length,
+        suspiciousEvents: filteredEvents.filter((e) => e.isSuspicious).length,
+        shellExecutions: filteredEvents.filter((e) => e.category === "shell").length,
+        networkTools: filteredEvents.filter((e) => e.category === "network_tool").length,
+        scriptingLanguages: filteredEvents.filter((e) => e.category === "scripting").length,
+        uniqueNamespaces: [...new Set(filteredEvents.map((e) => e.namespace))].length,
+        uniquePods: [...new Set(filteredEvents.map((e) => `${e.namespace}/${e.podName}`))].length,
+      };
+
+      // Group by namespace/pod for display
+      const groupedByPod = new Map<string, ProcessEvent[]>();
+      for (const event of filteredEvents) {
+        const key = `${event.namespace}/${event.podName}`;
+        if (!groupedByPod.has(key)) {
+          groupedByPod.set(key, []);
+        }
+        groupedByPod.get(key)!.push(event);
+      }
+
+      const podGroups = Array.from(groupedByPod.entries()).map(([key, events]) => ({
+        key,
+        namespace: events[0]?.namespace ?? "",
+        podName: events[0]?.podName ?? "",
+        events,
+        suspiciousCount: events.filter((e) => e.isSuspicious).length,
+        totalExecs: events.reduce((sum, e) => sum + e.execCount, 0),
+      }));
+
+      // Sort by suspicious count descending
+      podGroups.sort((a, b) => b.suspiciousCount - a.suspiciousCount);
+
+      return {
+        events: filteredEvents.slice(0, 100), // Return top 100 events
+        podGroups: podGroups.slice(0, 20), // Return top 20 pods
+        summary,
+      };
+    }),
 });

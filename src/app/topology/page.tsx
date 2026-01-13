@@ -2,11 +2,10 @@
 
 import { useState, useMemo } from "react";
 import AppShell from "~/components/layout/app-shell";
-import { TopologyMap, DetailPanel } from "~/components/topology";
+import { TopologyMap, DetailPanel, ProcessEventsPanel } from "~/components/topology";
 import { useTopologyStore } from "~/stores/topology-store";
 import { trpc } from "~/lib/trpc";
 import { Card, CardContent } from "~/components/ui/card";
-import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 
 export default function TopologyPage() {
@@ -56,13 +55,13 @@ export default function TopologyPage() {
 
   return (
     <AppShell>
-      <div className="h-[calc(100vh-120px)] flex flex-col">
+      <div className="min-h-[calc(100vh-120px)] flex flex-col">
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Policy Topology</h1>
+            <h1 className="text-2xl font-bold text-foreground">Topology & Telemetry</h1>
             <p className="mt-1 text-muted">
-              Visualize network policies and traffic flows
+              Visualize network policies, traffic flows, and runtime security events
             </p>
           </div>
 
@@ -245,6 +244,14 @@ export default function TopologyPage() {
             <span>No Policy</span>
           </div>
         </div>
+
+        {/* Runtime Security Events Panel */}
+        {selectedClusterId && (
+          <ProcessEventsPanel
+            clusterId={selectedClusterId}
+            timeRange={filters.timeRange}
+          />
+        )}
       </div>
     </AppShell>
   );

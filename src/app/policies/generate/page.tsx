@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
@@ -49,17 +49,24 @@ const policyTypeOptions = [
   { value: "GATEWAY_TCPROUTE", label: "Gateway TCP Route" },
 ];
 
-const examplePrompts = [
+const networkExamplePrompts = [
   "Allow frontend pods to communicate with the API service on port 8080",
   "Block all egress traffic except DNS queries to kube-system",
   "Allow ingress from the internet on ports 80 and 443 for pods with label app=web",
-  "Monitor all exec syscalls in the production namespace",
-  "Route HTTP traffic from api.example.com to the api-gateway service",
   "Allow database pods to only receive connections from backend services on port 5432",
+];
+
+const tetragonExamplePrompts = [
+  "Block all shell execution (sh, bash, zsh) in the llm-system namespace and kill the process immediately",
+  "Block network reconnaissance tools (curl, wget, nc, netcat) in LLM pods to prevent data exfiltration",
+  "Block Python and scripting interpreters in the llm-frontend namespace to prevent code injection",
+  "Alert and log when any process reads files in /root/.ollama/models/ to detect model theft attempts",
+  "Block privilege escalation attempts (setuid, setgid syscalls) in all pods in the llm-system namespace",
 ];
 
 export default function GeneratePolicyPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [prompt, setPrompt] = useState("");
   const [policyType, setPolicyType] = useState<PolicyType>("CILIUM_NETWORK");
   const [targetNamespace, setTargetNamespace] = useState("");
@@ -68,8 +75,32 @@ export default function GeneratePolicyPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [selectedClusterId, setSelectedClusterId] = useState("");
+  const [prefilled, setPrefilled] = useState(false);
 
   const utils = trpc.useUtils();
+
+  // Read pre-filled values from URL params (from telemetry panel)
+  useEffect(() => {
+    const urlPrompt = searchParams.get("prompt");
+    const urlType = searchParams.get("type");
+    const urlNamespace = searchParams.get("namespace");
+
+    if (urlPrompt) {
+      setPrompt(decodeURIComponent(urlPrompt));
+      setPrefilled(true);
+    }
+    if (urlType && policyTypeOptions.some((p) => p.value === urlType)) {
+      setPolicyType(urlType as PolicyType);
+    }
+    if (urlNamespace) {
+      setTargetNamespace(decodeURIComponent(urlNamespace));
+    }
+
+    // Clear URL params after reading to avoid confusion on refresh
+    if (urlPrompt !== null || urlType !== null || urlNamespace !== null) {
+      router.replace("/policies/generate", { scroll: false });
+    }
+  }, [searchParams, router]);
 
   // Fetch clusters for save modal
   const { data: clusters } = trpc.cluster.list.useQuery();
@@ -173,14 +204,43 @@ export default function GeneratePolicyPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Policy Description</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle>Policy Description</CardTitle>
+                {prefilled && (
+                  <Badge variant="tetragon">
+                    <svg className="mr-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    From Telemetry
+                  </Badge>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {prefilled && (
+                <div className="rounded-md border border-tetragon/30 bg-tetragon/10 p-3 mb-4">
+                  <div className="flex items-start gap-2">
+                    <svg className="h-5 w-5 text-tetragon flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-tetragon">Policy generated from observed telemetry</p>
+                      <p className="text-xs text-muted mt-0.5">
+                        This prompt was created based on suspicious runtime activity detected by Tetragon.
+                        Review and customize before generating.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <Textarea
                 label="What should this policy do?"
                 placeholder="E.g., Allow frontend pods to communicate with the API service on port 8080, but block all other egress traffic except DNS..."
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => {
+                  setPrompt(e.target.value);
+                  if (prefilled) setPrefilled(false);
+                }}
                 rows={6}
                 disabled={isGenerating}
               />
@@ -236,18 +296,51 @@ export default function GeneratePolicyPage() {
             <CardHeader>
               <CardTitle>Example Prompts</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {examplePrompts.map((example, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleUseExample(example)}
-                    className="w-full rounded-md border border-card-border bg-card-hover/50 p-3 text-left text-sm text-muted hover:border-primary/50 hover:text-foreground transition-colors"
-                    disabled={isGenerating}
-                  >
-                    &ldquo;{example}&rdquo;
-                  </button>
-                ))}
+            <CardContent className="space-y-4">
+              {/* Tetragon Runtime Security Examples */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="tetragon">Tetragon</Badge>
+                  <span className="text-xs text-muted">Runtime Security</span>
+                </div>
+                <div className="space-y-2">
+                  {tetragonExamplePrompts.map((example, index) => (
+                    <button
+                      key={`tetragon-${index}`}
+                      onClick={() => {
+                        handleUseExample(example);
+                        setPolicyType("TETRAGON");
+                      }}
+                      className="w-full rounded-md border border-tetragon/30 bg-tetragon/5 p-3 text-left text-sm text-muted hover:border-tetragon/50 hover:text-foreground transition-colors"
+                      disabled={isGenerating}
+                    >
+                      &ldquo;{example}&rdquo;
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Network Policy Examples */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="cilium">Cilium</Badge>
+                  <span className="text-xs text-muted">Network Policies</span>
+                </div>
+                <div className="space-y-2">
+                  {networkExamplePrompts.map((example, index) => (
+                    <button
+                      key={`network-${index}`}
+                      onClick={() => {
+                        handleUseExample(example);
+                        setPolicyType("CILIUM_NETWORK");
+                      }}
+                      className="w-full rounded-md border border-cilium/30 bg-cilium/5 p-3 text-left text-sm text-muted hover:border-cilium/50 hover:text-foreground transition-colors"
+                      disabled={isGenerating}
+                    >
+                      &ldquo;{example}&rdquo;
+                    </button>
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>
