@@ -134,24 +134,62 @@ export async function POST(request: NextRequest) {
     }
 
     // Store process summaries
+    // The collector sends topBinaries array, so we need to expand each binary into a separate record
     if (data.processSummaries && data.processSummaries.length > 0) {
-      const processData = data.processSummaries.map((summary) => ({
-        clusterId: data.clusterId,
-        timestamp: new Date(data.timestamp),
-        windowStart: new Date(summary.windowStart),
-        windowEnd: new Date(summary.windowEnd),
-        nodeName: summary.nodeName,
-        namespace: summary.namespace,
-        podName: summary.podName ?? "",
-        processName: summary.processName ?? "",
-        execCount: summary.execCount ?? summary.totalExecs ?? 0,
-        syscallCounts: summary.syscallCounts,
-      }));
+      const processData: Array<{
+        clusterId: string;
+        timestamp: Date;
+        windowStart: Date;
+        windowEnd: Date;
+        nodeName: string;
+        namespace: string;
+        podName: string;
+        processName: string;
+        execCount: number;
+        syscallCounts: Record<string, number> | undefined;
+      }> = [];
 
-      await db.processSummary.createMany({
-        data: processData,
-        skipDuplicates: true,
-      });
+      for (const summary of data.processSummaries) {
+        // If topBinaries is provided, create a record for each binary
+        if (summary.topBinaries && summary.topBinaries.length > 0) {
+          for (const bin of summary.topBinaries) {
+            processData.push({
+              clusterId: data.clusterId,
+              timestamp: new Date(data.timestamp),
+              windowStart: new Date(summary.windowStart),
+              windowEnd: new Date(summary.windowEnd),
+              nodeName: summary.nodeName,
+              namespace: summary.namespace,
+              podName: summary.podName ?? "",
+              processName: bin.binary,
+              execCount: bin.count,
+              syscallCounts: summary.syscallCounts,
+            });
+          }
+        } else if (summary.processName) {
+          // Fallback to processName if provided directly
+          processData.push({
+            clusterId: data.clusterId,
+            timestamp: new Date(data.timestamp),
+            windowStart: new Date(summary.windowStart),
+            windowEnd: new Date(summary.windowEnd),
+            nodeName: summary.nodeName,
+            namespace: summary.namespace,
+            podName: summary.podName ?? "",
+            processName: summary.processName,
+            execCount: summary.execCount ?? summary.totalExecs ?? 0,
+            syscallCounts: summary.syscallCounts,
+          });
+        }
+        // Skip summaries with no binary info (no processName and no topBinaries)
+      }
+
+      if (processData.length > 0) {
+        await db.processSummary.createMany({
+          data: processData,
+          skipDuplicates: true,
+        });
+      }
 
       processSummariesCount = processData.length;
     }
