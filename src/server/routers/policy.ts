@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import yaml from "js-yaml";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
 import {
   isGatewayAPIType,
   validateGatewayAPIPolicy,
+  KIND_TO_POLICY_TYPE,
+  GATEWAY_API_KINDS,
 } from "~/lib/gateway-api-validator";
 
 // Use orgProtectedProcedure for all policy operations (requires organization)
@@ -593,5 +596,165 @@ export const policyRouter = createTRPCRouter({
         },
         resources: validationResults,
       };
+    }),
+
+  // Parse YAML to discover Gateway API resources for import
+  parseGatewayYaml: protectedProcedure
+    .input(z.object({ yamlContent: z.string() }))
+    .mutation(async ({ input }) => {
+      const { yamlContent } = input;
+
+      // Split multi-document YAML
+      const documents = yamlContent.split(/^---$/m).filter((doc) => doc.trim());
+
+      interface DiscoveredResource {
+        name: string;
+        namespace: string;
+        kind: string;
+        policyType: string;
+        hostnames: string[];
+        yaml: string;
+        valid: boolean;
+        error?: string;
+      }
+
+      const discovered: DiscoveredResource[] = [];
+
+      for (const doc of documents) {
+        try {
+          const parsed = yaml.load(doc.trim()) as Record<string, unknown>;
+          if (!parsed || typeof parsed !== "object") continue;
+
+          const kind = parsed.kind as string;
+          const apiVersion = parsed.apiVersion as string;
+
+          // Check if it's a Gateway API resource
+          if (!apiVersion?.includes("gateway.networking.k8s.io")) continue;
+          if (!GATEWAY_API_KINDS.includes(kind as typeof GATEWAY_API_KINDS[number])) continue;
+
+          const metadata = parsed.metadata as Record<string, unknown> | undefined;
+          const spec = parsed.spec as Record<string, unknown> | undefined;
+
+          const name = (metadata?.name as string) ?? "unknown";
+          const namespace = (metadata?.namespace as string) ?? "default";
+          const hostnames = (spec?.hostnames as string[]) ?? [];
+          const policyType = KIND_TO_POLICY_TYPE[kind as keyof typeof KIND_TO_POLICY_TYPE];
+
+          if (!policyType) continue;
+
+          // Clean up the YAML - remove status, managedFields, etc.
+          const cleanedParsed = {
+            apiVersion: parsed.apiVersion,
+            kind: parsed.kind,
+            metadata: {
+              name: metadata?.name,
+              namespace: metadata?.namespace,
+              labels: metadata?.labels,
+              annotations: metadata?.annotations,
+            },
+            spec: parsed.spec,
+          };
+
+          // Remove undefined values
+          if (!cleanedParsed.metadata.labels) delete (cleanedParsed.metadata as Record<string, unknown>).labels;
+          if (!cleanedParsed.metadata.annotations) delete (cleanedParsed.metadata as Record<string, unknown>).annotations;
+
+          const cleanedYaml = yaml.dump(cleanedParsed, { indent: 2, lineWidth: -1 });
+
+          discovered.push({
+            name,
+            namespace,
+            kind,
+            policyType,
+            hostnames,
+            yaml: cleanedYaml,
+            valid: true,
+          });
+        } catch (e) {
+          // Skip invalid YAML documents
+          continue;
+        }
+      }
+
+      return { discovered };
+    }),
+
+  // Import a Gateway API resource as a policy
+  importGatewayResource: protectedProcedure
+    .input(
+      z.object({
+        clusterId: z.string(),
+        name: z.string(),
+        namespace: z.string(),
+        policyType: z.string(),
+        yamlContent: z.string(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify cluster belongs to organization
+      const cluster = await ctx.db.cluster.findFirst({
+        where: {
+          id: input.clusterId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!cluster) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Cluster not found",
+        });
+      }
+
+      // Check for duplicate name in cluster
+      const existing = await ctx.db.policy.findUnique({
+        where: {
+          clusterId_name: {
+            clusterId: input.clusterId,
+            name: input.name,
+          },
+        },
+      });
+
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Policy "${input.name}" already exists in this cluster`,
+        });
+      }
+
+      // Validate the YAML
+      if (isGatewayAPIType(input.policyType)) {
+        validateGatewayAPIPolicy(input.yamlContent, input.policyType);
+      }
+
+      // Create the policy
+      const policy = await ctx.db.policy.create({
+        data: {
+          name: input.name,
+          description: input.description ?? `Imported ${input.policyType.replace("GATEWAY_", "")} from cluster`,
+          type: input.policyType as "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE" | "GATEWAY_TLSROUTE",
+          content: input.yamlContent,
+          targetNamespaces: [input.namespace],
+          status: "DEPLOYED", // Already deployed in cluster
+          deployedAt: new Date(),
+          organizationId: ctx.organizationId,
+          clusterId: input.clusterId,
+          createdById: ctx.userId,
+        },
+      });
+
+      // Create initial version
+      await ctx.db.policyVersion.create({
+        data: {
+          policyId: policy.id,
+          version: 1,
+          content: input.yamlContent,
+          changelog: "Imported from cluster",
+        },
+      });
+
+      return policy;
     }),
 });
