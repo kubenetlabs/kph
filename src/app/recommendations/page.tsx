@@ -213,7 +213,7 @@ export default function RecommendationsPage() {
   const { data: clusters } = trpc.cluster.list.useQuery();
   const clusterList = clusters ?? [];
 
-  // Fetch recommendations
+  // Fetch recommendations (includes stats to avoid duplicate query)
   const { data: recommendationsData, isLoading } =
     trpc.recommendations.getAll.useQuery(
       {
@@ -225,14 +225,8 @@ export default function RecommendationsPage() {
       { refetchInterval: 60000 }
     );
 
-  // Fetch stats
-  const { data: stats } = trpc.recommendations.getStats.useQuery(
-    {
-      clusterId: selectedClusterId || undefined,
-      hours: timeRange,
-    },
-    { refetchInterval: 60000 }
-  );
+  // Stats are now included in getAll response (no separate query needed)
+  const stats = recommendationsData?.stats;
 
   // Filter out dismissed recommendations
   const recommendations = (recommendationsData?.recommendations ?? []).filter(

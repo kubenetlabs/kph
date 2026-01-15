@@ -98,37 +98,20 @@ export const recommendationsRouter = createTRPCRouter({
       const clusterMap = new Map(clusters.map((c) => [c.id, c.name]));
       const clusterIds = clusters.map((c) => c.id);
 
-      // Get coverage gap recommendations
-      if (!input.type || input.type === "COVERAGE_GAP") {
-        const gapRecs = await getCoverageGapRecommendations(
-          ctx.db,
-          clusterIds,
-          clusterMap,
-          input.hours
-        );
-        recommendations.push(...gapRecs);
-      }
+      // Run recommendation generators in parallel for better performance
+      const [gapRecs, unusedRecs, consolidationRecs] = await Promise.all([
+        (!input.type || input.type === "COVERAGE_GAP")
+          ? getCoverageGapRecommendations(ctx.db, clusterIds, clusterMap, input.hours)
+          : Promise.resolve([]),
+        (!input.type || input.type === "UNUSED_POLICY")
+          ? getUnusedPolicyRecommendations(ctx.db, clusterIds, clusterMap, input.hours)
+          : Promise.resolve([]),
+        (!input.type || input.type === "CONSOLIDATION")
+          ? getConsolidationRecommendations(ctx.db, clusterIds, clusterMap)
+          : Promise.resolve([]),
+      ]);
 
-      // Get unused policy recommendations
-      if (!input.type || input.type === "UNUSED_POLICY") {
-        const unusedRecs = await getUnusedPolicyRecommendations(
-          ctx.db,
-          clusterIds,
-          clusterMap,
-          input.hours
-        );
-        recommendations.push(...unusedRecs);
-      }
-
-      // Get consolidation recommendations
-      if (!input.type || input.type === "CONSOLIDATION") {
-        const consolidationRecs = await getConsolidationRecommendations(
-          ctx.db,
-          clusterIds,
-          clusterMap
-        );
-        recommendations.push(...consolidationRecs);
-      }
+      recommendations.push(...gapRecs, ...unusedRecs, ...consolidationRecs);
 
       // Filter by severity if specified
       let filtered = recommendations;
@@ -149,9 +132,25 @@ export const recommendationsRouter = createTRPCRouter({
         return b.impact - a.impact;
       });
 
+      // Compute stats from recommendations (avoids separate query)
+      const stats = {
+        total: recommendations.length,
+        byType: {
+          COVERAGE_GAP: gapRecs.length,
+          UNUSED_POLICY: unusedRecs.length,
+          CONSOLIDATION: consolidationRecs.length,
+        },
+        bySeverity: {
+          CRITICAL: recommendations.filter((r) => r.severity === "CRITICAL").length,
+          WARNING: recommendations.filter((r) => r.severity === "WARNING").length,
+          INFO: recommendations.filter((r) => r.severity === "INFO").length,
+        },
+      };
+
       return {
         recommendations: filtered.slice(0, input.limit),
         total: filtered.length,
+        stats,
       };
     }),
 
