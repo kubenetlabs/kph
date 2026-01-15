@@ -455,22 +455,52 @@ export const topologyRouter = createTRPCRouter({
       ];
 
       // Query using OR to support both old records (timestamp) and properly tagged records (windowStart)
-      console.log("[Topology] Querying process summaries for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange);
+      console.log("[Topology] Querying process summaries for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange, "suspicious:", input.suspicious);
+
+      // Build suspicious process filter for database-level filtering
+      // This ensures we find attack events even when buried under infrastructure noise
+      const suspiciousProcessFilter = input.suspicious
+        ? {
+            OR: [
+              { processName: { contains: "/sh" } },
+              { processName: { contains: "/bash" } },
+              { processName: { contains: "/zsh" } },
+              { processName: { contains: "/dash" } },
+              { processName: { contains: "/ash" } },
+              { processName: { contains: "/curl" } },
+              { processName: { contains: "/wget" } },
+              { processName: { contains: "/nc" } },
+              { processName: { contains: "/netcat" } },
+              { processName: { contains: "/python" } },
+              { processName: { contains: "/perl" } },
+              { processName: { contains: "/ruby" } },
+              { processName: { contains: "/chmod" } },
+              { processName: { contains: "/chown" } },
+              { processName: { contains: "/base64" } },
+              { processName: { contains: "/nmap" } },
+            ],
+          }
+        : {};
 
       const processSummaries = await ctx.db.processSummary.findMany({
         where: {
-          clusterId: input.clusterId,
-          OR: [
-            { timestamp: { gte: since } },
-            { windowStart: { gte: since } },
+          AND: [
+            { clusterId: input.clusterId },
+            {
+              OR: [
+                { timestamp: { gte: since } },
+                { windowStart: { gte: since } },
+              ],
+            },
+            ...(input.namespace ? [{ namespace: input.namespace }] : []),
+            ...(input.suspicious ? [suspiciousProcessFilter] : []),
           ],
-          ...(input.namespace && { namespace: input.namespace }),
         },
         orderBy: { timestamp: "desc" },
         take: 500,
       });
 
-      console.log("[Topology] Found", processSummaries.length, "process summaries");
+      console.log("[Topology] Found", processSummaries.length, "process summaries (suspicious filter at DB level:", !!input.suspicious, ")");
 
       // Aggregate and categorize events
       interface ProcessEvent {
