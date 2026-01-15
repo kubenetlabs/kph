@@ -198,27 +198,38 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 		r.allowedCount++
 	}
 
-	// Sample events
-	r.eventCounter++
-	if r.sampleRate == 1 || r.eventCounter%int64(r.sampleRate) == 0 {
+	// Build the event record
+	matchedPolicy := ""
+	if len(event.MatchedPolicies) > 0 {
+		matchedPolicy = event.MatchedPolicies[0]
+	}
+	eventRecord := ProcessValidationEvent{
+		Timestamp:     event.Timestamp,
+		Verdict:       verdict,
+		Namespace:     event.SrcNamespace,
+		PodName:       event.SrcPodName,
+		NodeName:      event.NodeName,
+		Binary:        event.SrcBinary,
+		Arguments:     event.SrcArguments,
+		Syscall:       event.Syscall,
+		FilePath:      event.FilePath,
+		MatchedPolicy: matchedPolicy,
+		Action:        event.Action,
+	}
+
+	// Always record blocked events (security-critical), sample others
+	if verdict == "BLOCKED" {
+		// Always record blocked events
 		if len(r.recentEvents) < r.maxEvents {
-			matchedPolicy := ""
-			if len(event.MatchedPolicies) > 0 {
-				matchedPolicy = event.MatchedPolicies[0]
+			r.recentEvents = append(r.recentEvents, eventRecord)
+		}
+	} else {
+		// Sample non-blocked events
+		r.eventCounter++
+		if r.sampleRate == 1 || r.eventCounter%int64(r.sampleRate) == 0 {
+			if len(r.recentEvents) < r.maxEvents {
+				r.recentEvents = append(r.recentEvents, eventRecord)
 			}
-			r.recentEvents = append(r.recentEvents, ProcessValidationEvent{
-				Timestamp:     event.Timestamp,
-				Verdict:       verdict,
-				Namespace:     event.SrcNamespace,
-				PodName:       event.SrcPodName,
-				NodeName:      event.NodeName,
-				Binary:        event.SrcBinary,
-				Arguments:     event.SrcArguments,
-				Syscall:       event.Syscall,
-				FilePath:      event.FilePath,
-				MatchedPolicy: matchedPolicy,
-				Action:        event.Action,
-			})
 		}
 	}
 }
