@@ -37,16 +37,27 @@ export const topologyRouter = createTRPCRouter({
       // Query flow summaries for this cluster
       // Run two queries in parallel: one for recent flows, one for dropped/denied flows
       // This ensures policy-blocked traffic is visible even with high flow volumes
-      // Note: Use windowStart for filtering since that's when events actually occurred
+      // Use OR to match either timestamp or windowStart for compatibility
+      const timeFilter = {
+        OR: [
+          { timestamp: { gte: since } },
+          { windowStart: { gte: since } },
+        ],
+      };
+
+      const namespaceFilter = input.filters?.namespaces?.length ? {
+        OR: [
+          { srcNamespace: { in: input.filters.namespaces } },
+          { dstNamespace: { in: input.filters.namespaces } },
+        ],
+      } : {};
+
       const baseWhere = {
         clusterId: input.clusterId,
-        windowStart: { gte: since },
-        ...(input.filters?.namespaces?.length ? {
-          OR: [
-            { srcNamespace: { in: input.filters.namespaces } },
-            { dstNamespace: { in: input.filters.namespaces } },
-          ],
-        } : {}),
+        AND: [
+          timeFilter,
+          ...(Object.keys(namespaceFilter).length > 0 ? [namespaceFilter] : []),
+        ],
       };
 
       const [recentFlows, policyBlockedFlows] = await Promise.all([
@@ -368,7 +379,10 @@ export const topologyRouter = createTRPCRouter({
       const flows = await ctx.db.flowSummary.findMany({
         where: {
           clusterId: input.clusterId,
-          windowStart: { gte: since },
+          OR: [
+            { timestamp: { gte: since } },
+            { windowStart: { gte: since } },
+          ],
         },
         select: {
           srcNamespace: true,
@@ -440,11 +454,14 @@ export const topologyRouter = createTRPCRouter({
         "nmap", "masscan", // Scanning tools
       ];
 
-      // Use windowStart for filtering since that's when events actually occurred
+      // Query using OR to support both old records (timestamp) and properly tagged records (windowStart)
       const processSummaries = await ctx.db.processSummary.findMany({
         where: {
           clusterId: input.clusterId,
-          windowStart: { gte: since },
+          OR: [
+            { timestamp: { gte: since } },
+            { windowStart: { gte: since } },
+          ],
           ...(input.namespace && { namespace: input.namespace }),
         },
         orderBy: { timestamp: "desc" },
