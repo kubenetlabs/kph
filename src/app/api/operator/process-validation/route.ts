@@ -96,19 +96,6 @@ export async function POST(request: NextRequest) {
     let summariesUpserted = 0;
     let eventsCreated = 0;
 
-    console.log("[process-validation] Received data:", {
-      clusterId: auth.clusterId,
-      summariesCount: summaries?.length ?? 0,
-      eventsCount: events?.length ?? 0,
-      summaries: summaries?.map(s => ({
-        hour: s.hour,
-        allowed: s.allowedCount,
-        blocked: s.blockedCount,
-        noPolicy: s.noPolicyCount,
-        topBlockedCount: s.topBlocked?.length ?? 0,
-      })),
-    });
-
     // Upsert process validation summaries
     if (summaries && summaries.length > 0) {
       for (const summary of summaries) {
@@ -137,7 +124,6 @@ export async function POST(request: NextRequest) {
           },
         });
         summariesUpserted++;
-        console.log("[process-validation] Upserted summary for hour:", summary.hour);
       }
     }
 
