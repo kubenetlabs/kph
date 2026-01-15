@@ -327,6 +327,16 @@ func (t *TetragonClient) kprobeToEvent(kprobe *tetragon.ProcessKprobe) *models.T
 	// Extract process information
 	t.extractProcessInfo(event, proc)
 
+	// If namespace is empty, try to get it from parent process
+	// Note: At the kprobe/syscall level, Pod context may not be available yet
+	// when Tetragon blocks a process execution
+	if event.SrcNamespace == "" && kprobe.Parent != nil && kprobe.Parent.Pod != nil {
+		event.SrcNamespace = kprobe.Parent.Pod.Namespace
+		if event.SrcPodName == "" {
+			event.SrcPodName = kprobe.Parent.Pod.Name
+		}
+	}
+
 	// Extract kprobe/syscall information
 	event.Syscall = kprobe.FunctionName
 
@@ -336,6 +346,13 @@ func (t *TetragonClient) kprobeToEvent(kprobe *tetragon.ProcessKprobe) *models.T
 		args = append(args, formatKprobeArg(arg))
 	}
 	event.SyscallArgs = args
+
+	// For execve syscalls, extract the executed binary from arguments
+	if (kprobe.FunctionName == "sys_execve" || kprobe.FunctionName == "__x64_sys_execve") && len(kprobe.Args) > 0 {
+		if strArg, ok := kprobe.Args[0].Arg.(*tetragon.KprobeArgument_StringArg); ok && strArg.StringArg != "" {
+			event.SrcBinary = strArg.StringArg
+		}
+	}
 
 	// Check for file operations
 	if isFileOperation(kprobe.FunctionName) {
