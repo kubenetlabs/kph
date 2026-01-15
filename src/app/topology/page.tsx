@@ -21,7 +21,7 @@ export default function TopologyPage() {
     setSelectedClusterId(clusterList[0].id);
   }
 
-  // Fetch topology data (includes namespaces derived from flow data)
+  // Fetch topology data
   const { data: topologyData, isLoading } = trpc.topology.getGraph.useQuery(
     {
       clusterId: selectedClusterId,
@@ -38,8 +38,12 @@ export default function TopologyPage() {
     }
   );
 
-  // Namespaces are now derived from getGraph response (no separate query needed)
-  const namespaces = topologyData?.namespaces ?? [];
+  // Fetch namespaces separately for complete coverage (24h window + policies)
+  const { data: namespacesData, isLoading: namespacesLoading } = trpc.topology.getNamespaces.useQuery(
+    { clusterId: selectedClusterId },
+    { enabled: !!selectedClusterId, staleTime: 60000 } // Cache for 1 min
+  );
+  const namespaces = namespacesData ?? [];
 
   // Convert topology data to React Flow format
   const nodes = useMemo(() => {
@@ -139,27 +143,26 @@ export default function TopologyPage() {
           </div>
 
           {/* Namespace filter */}
-          {namespaces && namespaces.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted">Namespace:</span>
-              <select
-                value={filters.namespaces[0] ?? ""}
-                onChange={(e) =>
-                  setFilters({
-                    namespaces: e.target.value ? [e.target.value] : [],
-                  })
-                }
-                className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
-              >
-                <option value="">All namespaces</option>
-                {namespaces.map((ns) => (
-                  <option key={ns} value={ns}>
-                    {ns}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted">Namespace:</span>
+            <select
+              value={filters.namespaces[0] ?? ""}
+              onChange={(e) =>
+                setFilters({
+                  namespaces: e.target.value ? [e.target.value] : [],
+                })
+              }
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+              disabled={namespacesLoading}
+            >
+              <option value="">{namespacesLoading ? "Loading..." : "All namespaces"}</option>
+              {namespaces.map((ns) => (
+                <option key={ns} value={ns}>
+                  {ns}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Summary stats */}
           {topologyData && (

