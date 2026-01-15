@@ -68,7 +68,7 @@ export default function DashboardPage() {
           }
         />
         <MetricCard
-          label="Flows Analyzed"
+          label="Simulation Flows Analyzed"
           value={formatNumber(simStats?.flowsAnalyzed ?? 0)}
           detail="Total analyzed"
           icon={
