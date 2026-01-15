@@ -1,5 +1,5 @@
 # Build stage - run on target platform for CGO compatibility
-FROM --platform=$TARGETPLATFORM golang:1.24-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /workspace
 
@@ -8,6 +8,7 @@ RUN apk add --no-cache git ca-certificates gcc musl-dev
 
 # Copy go mod files
 COPY go.mod go.sum ./
+ENV GOTOOLCHAIN=auto
 RUN go mod download
 
 # Copy source code
@@ -22,7 +23,7 @@ RUN CGO_ENABLED=0 go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=1 go build -a -o collector cmd/collector/main.go
 
 # Runtime stage - use alpine for musl-libc compatibility
-FROM --platform=$TARGETPLATFORM alpine:3.19
+FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates
 
