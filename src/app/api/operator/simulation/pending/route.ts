@@ -7,6 +7,9 @@ import {
   requireScope,
 } from "~/lib/api-auth";
 
+// This route uses request.headers, so it must be dynamic
+export const dynamic = "force-dynamic";
+
 // Response type for pending simulations
 interface PendingSimulation {
   simulationId: string;
