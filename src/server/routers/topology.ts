@@ -64,7 +64,7 @@ export const topologyRouter = createTRPCRouter({
         ctx.db.flowSummary.findMany({
           where: baseWhere,
           orderBy: { timestamp: "desc" },
-          take: 2000,
+          take: 500, // Reduced from 2000 for faster initial load
         }),
         // Ensure dropped/denied flows are always included
         ctx.db.flowSummary.findMany({
@@ -76,7 +76,7 @@ export const topologyRouter = createTRPCRouter({
             ],
           },
           orderBy: { timestamp: "desc" },
-          take: 500,
+          take: 200, // Reduced from 500 for faster initial load
         }),
       ]);
 
@@ -353,6 +353,7 @@ export const topologyRouter = createTRPCRouter({
       return {
         nodes,
         edges,
+        namespaces: Array.from(namespaces.keys()).sort(), // Derived from flow data
         summary: {
           totalNodes: nodes.length,
           totalEdges: edges.length,
@@ -497,7 +498,7 @@ export const topologyRouter = createTRPCRouter({
           ],
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
+        take: 100, // Reduced from 500 for faster initial load
       });
 
       console.log("[Topology] Found", processSummaries.length, "process summaries (suspicious filter at DB level:", !!input.suspicious, ")");

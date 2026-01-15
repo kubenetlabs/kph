@@ -21,7 +21,7 @@ export default function TopologyPage() {
     setSelectedClusterId(clusterList[0].id);
   }
 
-  // Fetch topology data
+  // Fetch topology data (includes namespaces derived from flow data)
   const { data: topologyData, isLoading } = trpc.topology.getGraph.useQuery(
     {
       clusterId: selectedClusterId,
@@ -38,11 +38,8 @@ export default function TopologyPage() {
     }
   );
 
-  // Fetch namespaces for filter
-  const { data: namespaces } = trpc.topology.getNamespaces.useQuery(
-    { clusterId: selectedClusterId },
-    { enabled: !!selectedClusterId }
-  );
+  // Namespaces are now derived from getGraph response (no separate query needed)
+  const namespaces = topologyData?.namespaces ?? [];
 
   // Convert topology data to React Flow format
   const nodes = useMemo(() => {
