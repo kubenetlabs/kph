@@ -24,7 +24,7 @@ function formatNumber(num: number): string {
   return num.toString();
 }
 
-// Type definitions for simulation results
+// Type definitions for network flow simulation results
 interface NSImpact {
   namespace: string;
   totalFlows: number;
@@ -58,13 +58,63 @@ interface SimulatedFlow {
   matchReason?: string;
 }
 
-interface SimulationResults {
+// Type definitions for Tetragon process simulation results
+interface TetragonNSImpact {
+  namespace: string;
+  totalProcesses: number;
+  totalExecs: number;
+  blockedProcesses: number;
+  blockedExecs: number;
+  allowedProcesses: number;
+  allowedExecs: number;
+}
+
+interface ProcessSimulationResult {
+  processId: string;
+  namespace: string;
+  podName: string;
+  binary: string;
+  execCount: number;
+  wouldBlock: boolean;
+  matchedSelector?: string;
+  matchReason?: string;
+  action?: string;
+}
+
+interface TetragonSimulationResults {
+  type: "TETRAGON";
+  policyName: string;
+  policyNamespace?: string;
+  totalProcesses: number;
+  totalExecs: number;
+  wouldBlockCount: number;
+  wouldBlockExecs: number;
+  wouldAllowCount: number;
+  wouldAllowExecs: number;
+  breakdownByNamespace: Record<string, TetragonNSImpact>;
+  sampleBlockedProcesses: ProcessSimulationResult[];
+  sampleAllowedProcesses: ProcessSimulationResult[];
+}
+
+interface NetworkSimulationResults {
+  type?: undefined;
   noChangeCount?: number;
   breakdownByNamespace?: Record<string, NSImpact>;
   breakdownByVerdict?: VerdictBreakdown;
   sampleFlows?: SimulatedFlow[];
   errors?: string[];
   durationNs?: number;
+}
+
+type SimulationResults = TetragonSimulationResults | NetworkSimulationResults;
+
+// Type guards for simulation results
+function isTetragonResults(results: SimulationResults | null): results is TetragonSimulationResults {
+  return results !== null && "type" in results && results.type === "TETRAGON";
+}
+
+function isNetworkResults(results: SimulationResults | null): results is NetworkSimulationResults {
+  return results !== null && !("type" in results && results.type === "TETRAGON");
 }
 
 // Verdict Breakdown Component
@@ -340,6 +390,181 @@ function SampleFlowsTable({ flows }: { flows: SimulatedFlow[] }) {
   );
 }
 
+// Tetragon Process Impact Table Component
+function TetragonNamespaceImpactTable({ impacts }: { impacts: Record<string, TetragonNSImpact> }) {
+  const namespaces = Object.values(impacts).sort((a, b) => b.totalProcesses - a.totalProcesses);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Impact by Namespace</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-card-border">
+                <th className="text-left py-2 px-3 text-muted font-medium">Namespace</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Unique Binaries</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Total Execs</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Would Block</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Blocked Execs</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Would Allow</th>
+              </tr>
+            </thead>
+            <tbody>
+              {namespaces.map((ns) => (
+                <tr key={ns.namespace} className="border-b border-card-border/50 hover:bg-card-hover">
+                  <td className="py-2 px-3 font-medium text-foreground">{ns.namespace}</td>
+                  <td className="py-2 px-3 text-right text-foreground">{formatNumber(ns.totalProcesses)}</td>
+                  <td className="py-2 px-3 text-right text-foreground">{formatNumber(ns.totalExecs)}</td>
+                  <td className="py-2 px-3 text-right text-danger">{formatNumber(ns.blockedProcesses)}</td>
+                  <td className="py-2 px-3 text-right text-danger">{formatNumber(ns.blockedExecs)}</td>
+                  <td className="py-2 px-3 text-right text-success">{formatNumber(ns.allowedProcesses)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {namespaces.length === 0 && (
+          <p className="text-center text-muted py-4">No namespace data available</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Tetragon Blocked Processes Table Component
+function TetragonBlockedProcessesTable({ processes }: { processes: ProcessSimulationResult[] }) {
+  const [filter, setFilter] = useState<"all" | "blocked">("blocked");
+
+  const filteredProcesses = filter === "blocked"
+    ? processes.filter(p => p.wouldBlock)
+    : processes;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle>Process Execution Results</CardTitle>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setFilter("all")}
+              className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                filter === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card-hover text-muted hover:text-foreground"
+              }`}
+            >
+              All ({processes.length})
+            </button>
+            <button
+              onClick={() => setFilter("blocked")}
+              className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                filter === "blocked"
+                  ? "bg-danger text-white"
+                  : "bg-card-hover text-muted hover:text-foreground"
+              }`}
+            >
+              Blocked ({processes.filter(p => p.wouldBlock).length})
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-card-border">
+                <th className="text-left py-2 px-3 text-muted font-medium">Binary</th>
+                <th className="text-left py-2 px-3 text-muted font-medium">Namespace</th>
+                <th className="text-left py-2 px-3 text-muted font-medium">Pod</th>
+                <th className="text-right py-2 px-3 text-muted font-medium">Exec Count</th>
+                <th className="text-center py-2 px-3 text-muted font-medium">Action</th>
+                <th className="text-left py-2 px-3 text-muted font-medium">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProcesses.map((proc, idx) => (
+                <tr
+                  key={idx}
+                  className={`border-b border-card-border/50 hover:bg-card-hover ${
+                    proc.wouldBlock ? "bg-danger/5" : ""
+                  }`}
+                >
+                  <td className="py-2 px-3">
+                    <code className="text-sm font-mono text-foreground">{proc.binary}</code>
+                  </td>
+                  <td className="py-2 px-3 text-foreground">{proc.namespace}</td>
+                  <td className="py-2 px-3 text-muted text-xs truncate max-w-[150px]">{proc.podName}</td>
+                  <td className="py-2 px-3 text-right text-foreground">{formatNumber(proc.execCount)}</td>
+                  <td className="py-2 px-3 text-center">
+                    {proc.wouldBlock ? (
+                      <Badge variant="danger">{proc.action ?? "Sigkill"}</Badge>
+                    ) : (
+                      <Badge variant="success">Allow</Badge>
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-xs text-muted max-w-[200px] truncate">
+                    {proc.matchReason ?? proc.matchedSelector ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filteredProcesses.length === 0 && (
+          <p className="text-center text-muted py-4">
+            {filter === "blocked" ? "No processes would be blocked" : "No process data available"}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Tetragon Verdict Summary Card
+function TetragonVerdictSummary({ results }: { results: TetragonSimulationResults }) {
+  const total = results.wouldBlockCount + results.wouldAllowCount;
+  const blockPercent = total > 0 ? (results.wouldBlockCount / total) * 100 : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Enforcement Summary</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span className="text-foreground">Would Block</span>
+              <span className="text-danger">{formatNumber(results.wouldBlockCount)} binaries ({formatNumber(results.wouldBlockExecs)} execs)</span>
+            </div>
+            <div className="h-2 bg-card-hover rounded-full overflow-hidden">
+              <div
+                className="h-full bg-danger rounded-full transition-all"
+                style={{ width: `${blockPercent}%` }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span className="text-foreground">Would Allow</span>
+              <span className="text-success">{formatNumber(results.wouldAllowCount)} binaries ({formatNumber(results.wouldAllowExecs)} execs)</span>
+            </div>
+            <div className="h-2 bg-card-hover rounded-full overflow-hidden">
+              <div
+                className="h-full bg-success rounded-full transition-all"
+                style={{ width: `${100 - blockPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SimulationDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -402,6 +627,9 @@ export default function SimulationDetailPage() {
   // Parse results if available
   const results = simulation.results as SimulationResults | null;
   const hasResults = isCompleted && results;
+  const tetragonResults = isTetragonResults(results) ? results : null;
+  const networkResults = isNetworkResults(results) ? results : null;
+  const isTetragonSimulation = tetragonResults !== null;
 
   return (
     <AppShell>
@@ -476,9 +704,12 @@ export default function SimulationDetailPage() {
                 : "border-transparent text-muted hover:text-foreground"
             }`}
           >
-            Sample Flows
-            {results.sampleFlows && (
-              <span className="ml-1.5 text-xs text-muted">({results.sampleFlows.length})</span>
+            {isTetragonSimulation ? "Processes" : "Sample Flows"}
+            {isTetragonSimulation && tetragonResults?.sampleBlockedProcesses && (
+              <span className="ml-1.5 text-xs text-muted">({tetragonResults.sampleBlockedProcesses.length} blocked)</span>
+            )}
+            {!isTetragonSimulation && networkResults?.sampleFlows && (
+              <span className="ml-1.5 text-xs text-muted">({networkResults.sampleFlows.length})</span>
             )}
           </button>
           <button
@@ -526,7 +757,7 @@ export default function SimulationDetailPage() {
                 <p className="text-2xl font-bold text-foreground">
                   {formatNumber(simulation.flowsAnalyzed ?? 0)}
                 </p>
-                <p className="text-sm text-muted">Flows Analyzed</p>
+                <p className="text-sm text-muted">{isTetragonSimulation ? "Binaries Analyzed" : "Flows Analyzed"}</p>
               </CardContent>
             </Card>
             <Card className="text-center">
@@ -534,7 +765,7 @@ export default function SimulationDetailPage() {
                 <p className="text-2xl font-bold text-success">
                   {simulation.flowsAllowed !== null ? formatNumber(simulation.flowsAllowed) : "—"}
                 </p>
-                <p className="text-sm text-muted">Allowed</p>
+                <p className="text-sm text-muted">{isTetragonSimulation ? "Would Allow" : "Allowed"}</p>
               </CardContent>
             </Card>
             <Card className="text-center">
@@ -542,15 +773,17 @@ export default function SimulationDetailPage() {
                 <p className="text-2xl font-bold text-danger">
                   {simulation.flowsDenied !== null ? formatNumber(simulation.flowsDenied) : "—"}
                 </p>
-                <p className="text-sm text-muted">Denied</p>
+                <p className="text-sm text-muted">{isTetragonSimulation ? "Would Block" : "Denied"}</p>
               </CardContent>
             </Card>
             <Card className="text-center">
               <CardContent className="py-4">
                 <p className="text-2xl font-bold text-warning">
-                  {simulation.flowsChanged !== null ? formatNumber(simulation.flowsChanged) : "—"}
+                  {isTetragonSimulation
+                    ? formatNumber(tetragonResults?.totalExecs ?? 0)
+                    : simulation.flowsChanged !== null ? formatNumber(simulation.flowsChanged) : "—"}
                 </p>
-                <p className="text-sm text-muted">Would Change</p>
+                <p className="text-sm text-muted">{isTetragonSimulation ? "Total Execs" : "Would Change"}</p>
               </CardContent>
             </Card>
           </div>
@@ -558,38 +791,64 @@ export default function SimulationDetailPage() {
           {/* Tab Content */}
           {activeTab === "overview" && hasResults && (
             <>
-              {/* Verdict Breakdown */}
-              {results.breakdownByVerdict && (
-                <VerdictBreakdownCard breakdown={results.breakdownByVerdict} />
+              {/* Tetragon Overview */}
+              {isTetragonSimulation && tetragonResults && (
+                <>
+                  <TetragonVerdictSummary results={tetragonResults} />
+                  {tetragonResults.breakdownByNamespace && Object.keys(tetragonResults.breakdownByNamespace).length > 0 && (
+                    <TetragonNamespaceImpactTable impacts={tetragonResults.breakdownByNamespace} />
+                  )}
+                </>
               )}
 
-              {/* Namespace Impact */}
-              {results.breakdownByNamespace && Object.keys(results.breakdownByNamespace).length > 0 && (
-                <NamespaceImpactTable impacts={results.breakdownByNamespace} />
-              )}
+              {/* Network Flow Overview */}
+              {!isTetragonSimulation && networkResults && (
+                <>
+                  {/* Verdict Breakdown */}
+                  {networkResults.breakdownByVerdict && (
+                    <VerdictBreakdownCard breakdown={networkResults.breakdownByVerdict} />
+                  )}
 
-              {/* Errors */}
-              {results.errors && results.errors.length > 0 && (
-                <Card className="border-danger/30">
-                  <CardHeader>
-                    <CardTitle className="text-danger">Errors</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {results.errors.map((err, idx) => (
-                        <li key={idx} className="text-sm text-danger bg-danger/10 p-2 rounded">
-                          {err}
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
+                  {/* Namespace Impact */}
+                  {networkResults.breakdownByNamespace && Object.keys(networkResults.breakdownByNamespace).length > 0 && (
+                    <NamespaceImpactTable impacts={networkResults.breakdownByNamespace} />
+                  )}
+
+                  {/* Errors */}
+                  {networkResults.errors && networkResults.errors.length > 0 && (
+                    <Card className="border-danger/30">
+                      <CardHeader>
+                        <CardTitle className="text-danger">Errors</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="space-y-2">
+                          {networkResults.errors.map((err, idx) => (
+                            <li key={idx} className="text-sm text-danger bg-danger/10 p-2 rounded">
+                              {err}
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
               )}
             </>
           )}
 
-          {activeTab === "flows" && hasResults && results.sampleFlows && (
-            <SampleFlowsTable flows={results.sampleFlows} />
+          {/* Processes tab for Tetragon */}
+          {activeTab === "flows" && hasResults && isTetragonSimulation && tetragonResults && (
+            <TetragonBlockedProcessesTable
+              processes={[
+                ...(tetragonResults.sampleBlockedProcesses ?? []),
+                ...(tetragonResults.sampleAllowedProcesses ?? []),
+              ]}
+            />
+          )}
+
+          {/* Flows tab for Network simulations */}
+          {activeTab === "flows" && hasResults && !isTetragonSimulation && networkResults?.sampleFlows && (
+            <SampleFlowsTable flows={networkResults.sampleFlows} />
           )}
 
           {activeTab === "policy" && simulation.policy?.content && (
@@ -682,11 +941,11 @@ export default function SimulationDetailPage() {
                 </div>
               )}
 
-              {results?.durationNs && (
+              {networkResults?.durationNs && (
                 <div>
                   <span className="text-xs text-muted">Duration</span>
                   <p className="mt-1 text-sm text-foreground">
-                    {(results.durationNs / 1_000_000_000).toFixed(2)}s
+                    {(networkResults.durationNs / 1_000_000_000).toFixed(2)}s
                   </p>
                 </div>
               )}
@@ -733,8 +992,39 @@ export default function SimulationDetailPage() {
             </Card>
           )}
 
-          {/* Quick Stats for completed */}
-          {hasResults && results.breakdownByVerdict && (
+          {/* Quick Stats for completed - Tetragon */}
+          {hasResults && isTetragonSimulation && tetragonResults && (
+            <Card className="border-tetragon/30 bg-tetragon/5">
+              <CardHeader>
+                <CardTitle className="text-tetragon">Impact Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted">Would be blocked:</span>
+                    <span className="font-medium text-danger">
+                      {formatNumber(tetragonResults.wouldBlockCount)} binaries
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted">Blocked executions:</span>
+                    <span className="font-medium text-danger">
+                      {formatNumber(tetragonResults.wouldBlockExecs)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted">Would be allowed:</span>
+                    <span className="font-medium text-success">
+                      {formatNumber(tetragonResults.wouldAllowCount)} binaries
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Quick Stats for completed - Network */}
+          {hasResults && !isTetragonSimulation && networkResults?.breakdownByVerdict && (
             <Card className="border-warning/30 bg-warning/5">
               <CardHeader>
                 <CardTitle className="text-warning">Impact Summary</CardTitle>
@@ -744,19 +1034,19 @@ export default function SimulationDetailPage() {
                   <div className="flex justify-between">
                     <span className="text-muted">Would be blocked:</span>
                     <span className="font-medium text-danger">
-                      {formatNumber(results.breakdownByVerdict.allowedToDenied)}
+                      {formatNumber(networkResults.breakdownByVerdict.allowedToDenied)}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted">Would be allowed:</span>
                     <span className="font-medium text-warning">
-                      {formatNumber(results.breakdownByVerdict.deniedToAllowed)}
+                      {formatNumber(networkResults.breakdownByVerdict.deniedToAllowed)}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted">No change:</span>
                     <span className="font-medium text-muted">
-                      {formatNumber(results.breakdownByVerdict.allowedToAllowed + results.breakdownByVerdict.deniedToDenied)}
+                      {formatNumber(networkResults.breakdownByVerdict.allowedToAllowed + networkResults.breakdownByVerdict.deniedToDenied)}
                     </span>
                   </div>
                 </div>

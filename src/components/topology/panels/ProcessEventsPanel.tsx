@@ -50,7 +50,21 @@ export function ProcessEventsPanel({ clusterId, timeRange }: ProcessEventsPanelP
         prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks network tools. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /usr/bin/curl, /usr/bin/wget, /usr/bin/nc, /usr/bin/netcat, /bin/nc. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
         break;
       case "scripting":
-        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks scripting interpreters. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /usr/bin/python, /usr/bin/python3, /usr/bin/perl, /usr/bin/ruby, /usr/bin/php. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks scripting interpreters.
+
+The selector structure must be EXACTLY like this (matchBinaries is an ARRAY):
+selectors:
+- matchBinaries:
+  - operator: In
+    values:
+    - /usr/bin/python
+    - /usr/bin/python3
+    - /usr/bin/perl
+    - /usr/bin/ruby
+  matchActions:
+  - action: Sigkill
+
+Use kprobe call: sys_execve with syscall: true. Do NOT use matchNamespaces.`;
         break;
       default:
         prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that monitors when ${processName} executes. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" to match the binary path. Do NOT use matchNamespaces.`;
