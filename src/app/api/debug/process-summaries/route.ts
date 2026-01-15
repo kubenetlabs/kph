@@ -11,6 +11,12 @@ export async function GET() {
       select: { id: true, name: true },
     });
 
+    // Get all policies with their types
+    const policies = await db.policy.findMany({
+      select: { id: true, name: true, type: true },
+      orderBy: { name: "asc" },
+    });
+
     // Get latest 20 process summaries
     const processSummaries = await db.processSummary.findMany({
       orderBy: { timestamp: "desc" },
@@ -60,6 +66,7 @@ export async function GET() {
 
     return NextResponse.json({
       clusters,
+      policies,
       countByCluster,
       suspiciousCount: suspiciousProcesses.length,
       suspiciousProcesses: suspiciousProcesses.map((ps) => ({

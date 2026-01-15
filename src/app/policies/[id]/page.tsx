@@ -102,8 +102,16 @@ export default function PolicyDetailPage() {
     },
   });
 
-  // Simulation mutation
+  // Simulation mutation (for network policies - operator-based)
   const simulationMutation = trpc.simulation.create.useMutation({
+    onSuccess: () => {
+      setIsSimulationModalOpen(false);
+      router.push("/simulation");
+    },
+  });
+
+  // Tetragon simulation mutation (for process policies - SaaS-side)
+  const tetragonSimulationMutation = trpc.simulation.simulateTetragonPolicy.useMutation({
     onSuccess: () => {
       setIsSimulationModalOpen(false);
       router.push("/simulation");
@@ -196,11 +204,22 @@ export default function PolicyDetailPage() {
 
   const handleStartSimulation = () => {
     if (!policy) return;
-    simulationMutation.mutate({
-      policyId: policy.id,
-      clusterId: policy.clusterId,
-      daysToAnalyze: simulationDays,
-    });
+
+    // Use Tetragon simulation for TETRAGON policies (SaaS-side)
+    if (policy.type === "TETRAGON") {
+      tetragonSimulationMutation.mutate({
+        policyId: policy.id,
+        clusterId: policy.clusterId,
+        daysToAnalyze: simulationDays,
+      });
+    } else {
+      // Use operator-based simulation for network policies
+      simulationMutation.mutate({
+        policyId: policy.id,
+        clusterId: policy.clusterId,
+        daysToAnalyze: simulationDays,
+      });
+    }
   };
 
   const handleExportYAML = () => {
@@ -879,14 +898,14 @@ export default function PolicyDetailPage() {
             </Button>
             <Button
               onClick={handleStartSimulation}
-              isLoading={simulationMutation.isPending}
+              isLoading={simulationMutation.isPending || tetragonSimulationMutation.isPending}
             >
               Start Simulation
             </Button>
           </div>
-          {simulationMutation.error && (
+          {(simulationMutation.error ?? tetragonSimulationMutation.error) && (
             <p className="mt-2 text-sm text-danger">
-              {simulationMutation.error.message}
+              {(simulationMutation.error ?? tetragonSimulationMutation.error)?.message}
             </p>
           )}
         </div>

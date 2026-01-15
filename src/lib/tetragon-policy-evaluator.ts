@@ -331,7 +331,8 @@ function selectorWouldBlock(selector: SelectorSpec): {
  */
 export function evaluateProcessAgainstPolicy(
   process: ProcessSummaryInput,
-  policy: TracingPolicySpec
+  policy: TracingPolicySpec,
+  debugLog = false
 ): ProcessSimulationResult {
   const result: ProcessSimulationResult = {
     processId: process.id,
@@ -348,24 +349,45 @@ export function evaluateProcessAgainstPolicy(
       ? policy.metadata.namespace
       : undefined;
 
+  if (debugLog) {
+    console.log(`[Evaluator] Process: ${process.processName} in ns=${process.namespace}, policy ns=${policyNamespace ?? "cluster-wide"}`);
+  }
+
   // Check each kprobe
   for (const kprobe of policy.spec.kprobes ?? []) {
     // We only evaluate sys_execve kprobes against ProcessSummary
     // (ProcessSummary contains process execution data)
     if (kprobe.call !== "sys_execve" && kprobe.syscall !== true) {
+      if (debugLog) {
+        console.log(`[Evaluator] Skipping kprobe ${kprobe.call} (not sys_execve or syscall!=true)`);
+      }
       continue;
+    }
+
+    if (debugLog) {
+      console.log(`[Evaluator] Checking kprobe ${kprobe.call}, selectors: ${kprobe.selectors?.length ?? 0}`);
     }
 
     // Check each selector in the kprobe
     for (const selector of kprobe.selectors ?? []) {
-      const { matches } = matchesSelector(
+      const { matches, reason } = matchesSelector(
         process,
         selector,
         policyNamespace
       );
 
+      if (debugLog) {
+        console.log(`[Evaluator] Selector match result: ${matches}, reason: ${reason ?? "matched"}`);
+        if (selector.matchArgs?.length) {
+          console.log(`[Evaluator] matchArgs: ${JSON.stringify(selector.matchArgs)}`);
+        }
+      }
+
       if (matches) {
         const { wouldBlock, action } = selectorWouldBlock(selector);
+        if (debugLog) {
+          console.log(`[Evaluator] Would block: ${wouldBlock}, action: ${action}`);
+        }
         if (wouldBlock) {
           result.wouldBlock = true;
           result.action = action;
@@ -421,6 +443,29 @@ export function simulateTracingPolicy(
     sampleAllowedProcesses: [],
   };
 
+  // Log parsed policy structure for debugging
+  console.log("[Evaluator] Parsed policy:", {
+    name: policy.metadata.name,
+    namespace: policy.metadata.namespace,
+    kind: policy.kind,
+    kprobesCount: policy.spec.kprobes?.length ?? 0,
+  });
+  if (policy.spec.kprobes?.[0]) {
+    const kp = policy.spec.kprobes[0];
+    console.log("[Evaluator] First kprobe:", {
+      call: kp.call,
+      syscall: kp.syscall,
+      selectorsCount: kp.selectors?.length ?? 0,
+    });
+    if (kp.selectors?.[0]) {
+      console.log("[Evaluator] First selector:", {
+        matchArgs: kp.selectors[0].matchArgs,
+        matchBinaries: kp.selectors[0].matchBinaries,
+        matchActions: kp.selectors[0].matchActions,
+      });
+    }
+  }
+
   // Evaluate each process
   for (const process of processes) {
     response.totalExecs += process.execCount;
@@ -441,8 +486,13 @@ export function simulateTracingPolicy(
     nsBrk.totalProcesses++;
     nsBrk.totalExecs += process.execCount;
 
+    // Enable debug logging for shell processes
+    const isShellProcess = process.processName.endsWith('/sh') ||
+                           process.processName.endsWith('/bash') ||
+                           process.processName.endsWith('/zsh');
+
     // Evaluate against policy
-    const result = evaluateProcessAgainstPolicy(process, policy);
+    const result = evaluateProcessAgainstPolicy(process, policy, isShellProcess);
 
     if (result.wouldBlock) {
       response.wouldBlockCount++;
