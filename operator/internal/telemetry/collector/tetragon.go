@@ -353,6 +353,11 @@ func (t *TetragonClient) kprobeToEvent(kprobe *tetragon.ProcessKprobe) *models.T
 	// Extract action (for enforcement policies)
 	event.Action = kprobe.Action.String()
 
+	// Extract policy name if present
+	if kprobe.PolicyName != "" {
+		event.MatchedPolicies = []string{kprobe.PolicyName}
+	}
+
 	// Set verdict based on action
 	switch kprobe.Action {
 	case tetragon.KprobeAction_KPROBE_ACTION_POST:
