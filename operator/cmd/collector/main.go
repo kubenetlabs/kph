@@ -298,6 +298,30 @@ func main() {
 		log.Info("Validation agent disabled")
 	}
 
+	// Initialize process validation reporter (for Tetragon events)
+	var processValidationReporter *validation.ProcessValidationReporter
+	if cfg.ValidationEnabled && cfg.SaaSEnabled && cfg.SaaSEndpoint != "" {
+		processValidationReporter = validation.NewProcessValidationReporter(validation.ProcessValidationReporterConfig{
+			Endpoint:   cfg.SaaSEndpoint,
+			APIKey:     cfg.SaaSAPIKey,
+			ClusterID:  cfg.ClusterID,
+			MaxEvents:  cfg.ValidationEventBuffer,
+			SampleRate: cfg.ValidationSampleRate,
+			Logger:     log,
+		})
+
+		// Start the process validation reporter flush loop
+		go processValidationReporter.Start(ctx, cfg.ValidationFlushInterval)
+
+		log.Info("Process validation reporter enabled",
+			"endpoint", cfg.SaaSEndpoint,
+			"flushInterval", cfg.ValidationFlushInterval,
+			"sampleRate", cfg.ValidationSampleRate,
+		)
+	} else {
+		log.Info("Process validation reporter disabled")
+	}
+
 	// Initialize and start Hubble client
 	if cfg.HubbleEnabled {
 		hubbleClient := collector.NewHubbleClient(collector.HubbleClientConfig{
@@ -350,6 +374,10 @@ func main() {
 			// Also send to SaaS aggregator
 			if saasSender != nil {
 				saasSender.AddEvent(event)
+			}
+			// Also send to process validation reporter
+			if processValidationReporter != nil {
+				processValidationReporter.RecordTetragonEvent(event)
 			}
 		})
 

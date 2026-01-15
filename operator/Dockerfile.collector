@@ -1,5 +1,5 @@
 # Build stage - use target platform for native compilation
-FROM --platform=$TARGETPLATFORM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /workspace
 
@@ -8,6 +8,7 @@ RUN apk add --no-cache git ca-certificates gcc musl-dev
 
 # Copy go mod files
 COPY go.mod go.sum ./
+ENV GOTOOLCHAIN=auto
 RUN go mod download
 
 # Copy source code
