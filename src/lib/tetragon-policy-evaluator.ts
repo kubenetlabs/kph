@@ -194,6 +194,11 @@ function matchesBinary(
   processName: string,
   spec: MatchBinarySpec
 ): boolean {
+  // Handle missing values array
+  if (!spec.values?.length) {
+    return false;
+  }
+
   const matchesAny = spec.values.some((value) => {
     switch (spec.operator) {
       case "In":
@@ -228,6 +233,11 @@ function matchesArg(
   if (spec.index !== 0) {
     // We only have binary path info from ProcessSummary, skip other args
     return true;
+  }
+
+  // Handle missing values array
+  if (!spec.values?.length) {
+    return false;
   }
 
   const matchesAny = spec.values.some((value) => {
@@ -268,6 +278,10 @@ function matchesSelector(
   // Check matchNamespaces if specified
   if (selector.matchNamespaces?.length) {
     const nsMatch = selector.matchNamespaces.some((nsSpec) => {
+      // Handle missing values array
+      if (!nsSpec.values?.length) {
+        return false;
+      }
       if (nsSpec.operator === "In") {
         return nsSpec.values.includes(process.namespace);
       } else {

@@ -39,20 +39,21 @@ export function ProcessEventsPanel({ clusterId, timeRange }: ProcessEventsPanelP
 
   const handleGeneratePolicy = (namespace: string, processName: string, category: string) => {
     // Build a natural language prompt based on the event type
+    // IMPORTANT: Prompts must specify correct Tetragon structure to avoid invalid YAML
     let prompt = "";
 
     switch (category) {
       case "shell":
-        prompt = `Block all shell execution (sh, bash, zsh, dash, ash) in pods in the ${namespace} namespace. Kill the process immediately if a shell is spawned.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks shell execution. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /bin/sh, /bin/bash, /bin/zsh, /bin/dash, /bin/ash, /usr/bin/sh, /usr/bin/bash, /usr/bin/zsh. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
         break;
       case "network_tool":
-        prompt = `Block network reconnaissance tools (curl, wget, nc, netcat) from executing in the ${namespace} namespace. These tools are commonly used for data exfiltration.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks network tools. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /usr/bin/curl, /usr/bin/wget, /usr/bin/nc, /usr/bin/netcat, /bin/nc. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
         break;
       case "scripting":
-        prompt = `Block scripting language interpreters (python, perl, ruby) from executing in pods in the ${namespace} namespace to prevent code injection attacks.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks scripting interpreters. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /usr/bin/python, /usr/bin/python3, /usr/bin/perl, /usr/bin/ruby, /usr/bin/php. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
         break;
       default:
-        prompt = `Monitor and alert when ${processName} executes in the ${namespace} namespace.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that monitors when ${processName} executes. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" to match the binary path. Do NOT use matchNamespaces.`;
     }
 
     // Navigate to policy generation page with pre-filled prompt
@@ -69,19 +70,23 @@ export function ProcessEventsPanel({ clusterId, timeRange }: ProcessEventsPanelP
 
     // Get unique namespaces with suspicious activity
     const namespaces = [...new Set(data.podGroups.map((pg) => pg.namespace))];
-    const nsText = namespaces.length > 1 ? `namespaces: ${namespaces.join(", ")}` : `namespace: ${namespaces[0]}`;
+    const ns = namespaces[0] ?? "default";
 
-    const prompt = `Create a comprehensive runtime security policy for LLM workloads in ${nsText}. The policy should:
-1. Block all shell execution (sh, bash, zsh) and kill the process immediately
-2. Block network tools (curl, wget, nc, netcat) to prevent data exfiltration
-3. Block scripting interpreters (python, perl) to prevent code injection
-4. Alert on any suspicious process execution
+    const prompt = `Create a Tetragon TracingPolicyNamespaced for the ${ns} namespace that provides comprehensive runtime security for LLM workloads.
 
-This policy protects against prompt injection attacks that attempt to escape the LLM sandbox.`;
+Use a kprobe on sys_execve with syscall: true. The selector should use matchBinaries with operator "In" and a values array containing ALL of these binaries:
+- Shells: /bin/sh, /bin/bash, /bin/zsh, /bin/dash, /bin/ash, /usr/bin/bash
+- Network tools: /usr/bin/curl, /usr/bin/wget, /usr/bin/nc
+- Scripting interpreters: /usr/bin/python, /usr/bin/python3, /usr/bin/perl, /usr/bin/ruby
+
+Use matchActions with action: Sigkill to terminate matching processes immediately.
+
+IMPORTANT: Do NOT use matchNamespaces - the namespace is already set in metadata.namespace for TracingPolicyNamespaced.`;
 
     const params = new URLSearchParams({
       prompt: encodeURIComponent(prompt),
       type: "TETRAGON",
+      namespace: ns,
     });
     router.push(`/policies/generate?${params.toString()}`);
   };
