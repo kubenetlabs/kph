@@ -1,0 +1,30 @@
+# KPH Natural Language Policy Prompts
+# =====================================
+# Use these prompts in the KPH Policies window to generate Cilium network
+# policies that block the vulnerabilities demonstrated in demo-attacks.sh
+#
+# These address the Cilium-related attacks (5 and 6).
+# Tetragon policies for attacks 2, 7a, 7b, 7d should be applied via the
+# Runtime Security suggested policies in the KPH UI.
+
+
+# ============================================================================
+# ATTACK 5: Unauthorized Ollama API Access
+# ============================================================================
+# Problem: Any pod in any namespace can directly access the Ollama API on
+# port 11434, enabling model theft or resource hijacking.
+#
+# Use this prompt:
+
+Create a Cilium network policy for the llm-system namespace that restricts ingress to the Ollama pod (app=ollama) on port 11434. Only allow traffic from pods in the llm-frontend namespace with the label app=openwebui. Deny all other ingress to the Ollama service.
+
+
+# ============================================================================
+# ATTACK 6: Cross-Namespace Direct Backend Access
+# ============================================================================
+# Problem: Pods in other namespaces can directly access OpenWebUI backend
+# on port 8080, bypassing the NGINX Gateway Fabric ingress controls.
+#
+# Use this prompt:
+
+Create a Cilium network policy for the llm-frontend namespace that restricts ingress to OpenWebUI pods (app=openwebui) on port 8080. Only allow traffic from the nginx-gateway namespace (NGINX Gateway Fabric) and from within the llm-frontend namespace itself. Block all other cross-namespace access to prevent bypassing the gateway.
