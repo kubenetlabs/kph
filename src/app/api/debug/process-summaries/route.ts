@@ -34,9 +34,38 @@ export async function GET() {
       _count: { id: true },
     });
 
+    // Search for suspicious processes (shell, curl, etc.)
+    const suspiciousProcesses = await db.processSummary.findMany({
+      where: {
+        OR: [
+          { processName: { contains: "/sh" } },
+          { processName: { contains: "/bash" } },
+          { processName: { contains: "/curl" } },
+          { processName: { contains: "/wget" } },
+          { processName: { contains: "/python" } },
+        ],
+      },
+      orderBy: { timestamp: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        clusterId: true,
+        timestamp: true,
+        namespace: true,
+        podName: true,
+        processName: true,
+        execCount: true,
+      },
+    });
+
     return NextResponse.json({
       clusters,
       countByCluster,
+      suspiciousCount: suspiciousProcesses.length,
+      suspiciousProcesses: suspiciousProcesses.map((ps) => ({
+        ...ps,
+        timestamp: ps.timestamp.toISOString(),
+      })),
       latestSummaries: processSummaries.map((ps) => ({
         ...ps,
         timestamp: ps.timestamp.toISOString(),
