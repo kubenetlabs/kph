@@ -25,19 +25,19 @@ log_result() { echo -e "${PURPLE}[RESULT]${NC} $1"; }
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 # =============================================================================
-# Attack 1: Lateral Movement via Internal Services
+# Attack 1: Lateral Movement to Infrastructure Services
 # =============================================================================
-# Simulates an attacker attempting to access internal services they shouldn't
-# be able to reach (Kubernetes API, services in other namespaces)
+# Simulates an attacker attempting to access infrastructure services they
+# shouldn't be able to reach (metrics-server, monitoring, kube-system services)
 # =============================================================================
 attack_egress_exfiltration() {
     echo ""
     echo "============================================================="
-    log_attack "ATTACK 1: Lateral Movement to Internal Services"
+    log_attack "ATTACK 1: Lateral Movement to Infrastructure Services"
     echo "============================================================="
     echo ""
     log_info "Scenario: An attacker with code execution attempts to access"
-    log_info "internal cluster services for lateral movement or data exfiltration."
+    log_info "cluster infrastructure services for reconnaissance and lateral movement."
     echo ""
 
     OLLAMA_POD=$(kubectl -n llm-system get pod -l app=ollama -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
@@ -47,36 +47,56 @@ attack_egress_exfiltration() {
         return 1
     fi
 
-    # Attack 1a: Try to access Kubernetes API (privilege escalation vector)
-    log_info "1a: Attempting to access Kubernetes API server..."
+    # Attack 1a: Try to access metrics-server (cluster reconnaissance)
+    log_info "1a: Attempting to access metrics-server in kube-system..."
     echo ""
-    echo "Command: Connect to kubernetes.default.svc:443"
+    echo "Command: Connect to metrics-server.kube-system.svc:443"
+    log_info "Impact: Attacker could enumerate all pods and resource usage"
     echo ""
 
-    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/kubernetes.default.svc/443" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/metrics-server.kube-system.svc.cluster.local/443" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
         echo "Connection established"
-        log_result "⚠️  VULNERABLE: Kubernetes API access SUCCEEDED"
-        log_result "Attacker could query API for secrets, escalate privileges!"
+        log_result "⚠️  VULNERABLE: Metrics-server access SUCCEEDED"
+        log_result "Attacker could enumerate pods, gather cluster intelligence!"
     else
         echo ""
-        log_result "✅ BLOCKED: Kubernetes API access was blocked by network policy"
+        log_result "✅ BLOCKED: Metrics-server access was blocked by network policy"
     fi
 
     echo ""
 
-    # Attack 1b: Try to access OpenWebUI in another namespace (cross-namespace lateral movement)
-    log_info "1b: Attempting cross-namespace access to OpenWebUI (llm-frontend)..."
+    # Attack 1b: Try to access CoreDNS directly (DNS infrastructure tampering)
+    log_info "1b: Attempting direct access to CoreDNS pods in kube-system..."
     echo ""
-    echo "Command: Connect to openwebui.llm-frontend.svc:8080"
+    echo "Command: Connect to kube-dns.kube-system.svc:53 (TCP)"
+    log_info "Impact: Attacker could attempt DNS poisoning or zone transfers"
     echo ""
 
-    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/openwebui.llm-frontend.svc.cluster.local/8080" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/kube-dns.kube-system.svc.cluster.local/53" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
         echo "Connection established"
-        log_result "⚠️  VULNERABLE: Cross-namespace access SUCCEEDED"
-        log_result "Attacker could pivot to frontend services!"
+        log_result "⚠️  VULNERABLE: Direct CoreDNS access SUCCEEDED"
+        log_result "Attacker could attempt DNS infrastructure attacks!"
     else
         echo ""
-        log_result "✅ BLOCKED: Cross-namespace access was blocked by network policy"
+        log_result "✅ BLOCKED: CoreDNS access was blocked by network policy"
+    fi
+
+    echo ""
+
+    # Attack 1c: Try to access Tetragon metrics (security monitoring evasion)
+    log_info "1c: Attempting to access Tetragon metrics in kube-system..."
+    echo ""
+    echo "Command: Connect to tetragon-operator-metrics.kube-system.svc:2113"
+    log_info "Impact: Attacker could probe security monitoring for evasion"
+    echo ""
+
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- bash -c 'timeout 3 bash -c "echo > /dev/tcp/tetragon-operator-metrics.kube-system.svc.cluster.local/2113" 2>/dev/null && echo "Connection established"' 2>/dev/null | grep -q "Connection established"; then
+        echo "Connection established"
+        log_result "⚠️  VULNERABLE: Tetragon metrics access SUCCEEDED"
+        log_result "Attacker could probe security monitoring capabilities!"
+    else
+        echo ""
+        log_result "✅ BLOCKED: Tetragon metrics access was blocked by network policy"
     fi
 }
 
