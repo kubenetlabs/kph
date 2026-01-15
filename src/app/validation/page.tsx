@@ -460,12 +460,6 @@ function ProcessValidationContent({
     { enabled: !!selectedClusterId && activeTab === "top" }
   );
 
-  // Org-wide process validation stats
-  const { data: orgStats } = trpc.processValidation.getOrgStats.useQuery(
-    { hours: timeRange },
-    { refetchInterval: 60000 }
-  );
-
   // Loading state
   if (summaryLoading) {
     return (
@@ -488,13 +482,13 @@ function ProcessValidationContent({
 
   return (
     <>
-      {/* Organization-wide stats */}
-      {orgStats && (
+      {/* Cluster-filtered stats summary */}
+      {summary && (
         <div className="mb-8 grid grid-cols-4 gap-4">
           <Card className="text-center">
             <CardContent className="py-4">
               <p className="text-2xl font-bold text-foreground">
-                {formatNumber(orgStats.totals.allowed + orgStats.totals.blocked + orgStats.totals.noPolicy)}
+                {formatNumber(summary.totals.allowed + summary.totals.blocked + summary.totals.noPolicy)}
               </p>
               <p className="text-sm text-muted">Total Processes Validated</p>
             </CardContent>
@@ -502,7 +496,7 @@ function ProcessValidationContent({
           <Card className="text-center">
             <CardContent className="py-4">
               <p className="text-2xl font-bold text-success">
-                {formatNumber(orgStats.totals.allowed)}
+                {formatNumber(summary.totals.allowed)}
               </p>
               <p className="text-sm text-muted">Allowed</p>
             </CardContent>
@@ -510,7 +504,7 @@ function ProcessValidationContent({
           <Card className="text-center">
             <CardContent className="py-4">
               <p className="text-2xl font-bold text-danger">
-                {formatNumber(orgStats.totals.blocked)}
+                {formatNumber(summary.totals.blocked)}
               </p>
               <p className="text-sm text-muted">Blocked</p>
             </CardContent>
@@ -518,7 +512,7 @@ function ProcessValidationContent({
           <Card className="text-center">
             <CardContent className="py-4">
               <p className="text-2xl font-bold text-warning">
-                {formatNumber(orgStats.totals.noPolicy)}
+                {formatNumber(summary.totals.noPolicy)}
               </p>
               <p className="text-sm text-muted">No Policy (Gaps)</p>
             </CardContent>
@@ -780,12 +774,6 @@ export default function ValidationDashboardPage() {
     { enabled: !!selectedClusterId && activeTab === "blocked" }
   );
 
-  // Org-wide stats
-  const { data: orgStats } = trpc.validation.getOrgStats.useQuery(
-    { hours: timeRange },
-    { refetchInterval: 60000 }
-  );
-
   return (
     <AppShell>
       {/* Header */}
@@ -867,13 +855,13 @@ export default function ValidationDashboardPage() {
       {/* Network Flows Content */}
       {validationType === "network" && (
         <>
-          {/* Organization-wide stats */}
-          {orgStats && (
+          {/* Cluster-filtered stats summary */}
+          {summary && (
             <div className="mb-8 grid grid-cols-4 gap-4">
               <Card className="text-center">
                 <CardContent className="py-4">
                   <p className="text-2xl font-bold text-foreground">
-                    {formatNumber(orgStats.totals.allowed + orgStats.totals.blocked + orgStats.totals.noPolicy)}
+                    {formatNumber(summary.totals.allowed + summary.totals.blocked + summary.totals.noPolicy)}
                   </p>
                   <p className="text-sm text-muted">Total Flows Validated</p>
                 </CardContent>
@@ -881,7 +869,7 @@ export default function ValidationDashboardPage() {
               <Card className="text-center">
                 <CardContent className="py-4">
                   <p className="text-2xl font-bold text-success">
-                    {formatNumber(orgStats.totals.allowed)}
+                    {formatNumber(summary.totals.allowed)}
                   </p>
                   <p className="text-sm text-muted">Allowed</p>
                 </CardContent>
@@ -889,7 +877,7 @@ export default function ValidationDashboardPage() {
               <Card className="text-center">
                 <CardContent className="py-4">
                   <p className="text-2xl font-bold text-danger">
-                    {formatNumber(orgStats.totals.blocked)}
+                    {formatNumber(summary.totals.blocked)}
                   </p>
                   <p className="text-sm text-muted">Blocked</p>
                 </CardContent>
@@ -897,7 +885,7 @@ export default function ValidationDashboardPage() {
               <Card className="text-center">
                 <CardContent className="py-4">
                   <p className="text-2xl font-bold text-warning">
-                    {formatNumber(orgStats.totals.noPolicy)}
+                    {formatNumber(summary.totals.noPolicy)}
                   </p>
                   <p className="text-sm text-muted">No Policy (Gaps)</p>
                 </CardContent>
