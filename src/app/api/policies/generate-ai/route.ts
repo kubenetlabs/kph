@@ -51,10 +51,11 @@ For Cilium Network Policies, remember:
 For Tetragon Tracing Policies:
 - Use TracingPolicyNamespaced (apiVersion: cilium.io/v1alpha1) for namespace-scoped policies
 - Use TracingPolicy (apiVersion: cilium.io/v1alpha1) for cluster-wide policies (no namespace in metadata)
-- kprobes structure requires: call (string), syscall (boolean), and selectors (array)
-- selectors contain: matchBinaries, matchArgs, matchNamespaces, and matchActions
-- matchActions use "action: Sigkill" to kill the process, "action: Signal" with "signal: SIGKILL" also works
-- matchBinaries uses "operator: In" with "values:" array of full paths like "/bin/sh", "/bin/bash"
+- kprobes structure requires: call (string), syscall (boolean), args (to capture syscall arguments), and selectors (array)
+- selectors contain: matchArgs, matchNamespaces, and matchActions
+- matchActions use "action: Sigkill" to kill the process
+- CRITICAL: For sys_execve, use matchArgs with index 0 to match the binary being executed (NOT matchBinaries which matches the calling process)
+- CRITICAL: When using matchArgs, you MUST define the args array with index and type to capture the argument
 
 CRITICAL: Tetragon TracingPolicy structure example for blocking shell execution:
 \`\`\`yaml
@@ -67,17 +68,19 @@ spec:
   kprobes:
   - call: "sys_execve"
     syscall: true
+    args:
+    - index: 0
+      type: "string"
     selectors:
-    - matchBinaries:
-      - operator: In
+    - matchArgs:
+      - index: 0
+        operator: "Postfix"
         values:
-        - /bin/sh
-        - /bin/bash
-        - /bin/zsh
-        - /bin/dash
-        - /bin/ash
-        - /usr/bin/sh
-        - /usr/bin/bash
+        - "/sh"
+        - "/bash"
+        - "/zsh"
+        - "/dash"
+        - "/ash"
       matchActions:
       - action: Sigkill
 \`\`\`
@@ -99,15 +102,15 @@ spec:
     selectors:
     - matchArgs:
       - index: 1
-        operator: Prefix
+        operator: "Prefix"
         values:
-        - /etc/shadow
-        - /var/run/secrets/kubernetes.io/serviceaccount
+        - "/etc/shadow"
+        - "/var/run/secrets/kubernetes.io/serviceaccount"
       matchActions:
       - action: Sigkill
 \`\`\`
 
-Example for blocking network tools:
+Example for blocking network tools (curl, wget, nc):
 \`\`\`yaml
 apiVersion: cilium.io/v1alpha1
 kind: TracingPolicyNamespaced
@@ -118,15 +121,19 @@ spec:
   kprobes:
   - call: "sys_execve"
     syscall: true
+    args:
+    - index: 0
+      type: "string"
     selectors:
-    - matchBinaries:
-      - operator: In
+    - matchArgs:
+      - index: 0
+        operator: "Postfix"
         values:
-        - /usr/bin/curl
-        - /usr/bin/wget
-        - /usr/bin/nc
-        - /usr/bin/netcat
-        - /bin/nc
+        - "/curl"
+        - "/wget"
+        - "/nc"
+        - "/netcat"
+        - "/ncat"
       matchActions:
       - action: Sigkill
 \`\`\`
