@@ -162,7 +162,9 @@ model Cluster {
   policyDeployments   PolicyDeployment[]
   validationSummaries ValidationSummary[]
   validationEvents    ValidationEvent[]
-  packDeployments     PolicyPackDeployment[]
+  packDeployments              PolicyPackDeployment[]
+  processValidationSummaries   ProcessValidationSummary[]
+  processValidationEvents      ProcessValidationEvent[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -957,4 +959,75 @@ model Notification {
   @@index([clusterId, read])
   @@index([clusterId, createdAt])
   @@map("notifications")
+}
+
+// ============================================================================
+// PROCESS VALIDATION (Tetragon Enforcement Tracking)
+// ============================================================================
+
+// Process validation verdicts aggregated hourly
+model ProcessValidationSummary {
+  id          String   @id @default(cuid())
+  clusterId   String
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  hour        DateTime // Bucket timestamp (start of hour)
+
+  // Verdict counts
+  allowedCount   Int @default(0)  // Processes allowed to execute
+  blockedCount   Int @default(0)  // Processes blocked by TracingPolicy (SIGKILL/OVERRIDE)
+  noPolicyCount  Int @default(0)  // Processes with no governing TracingPolicy
+
+  // Top blocked processes (potential security events)
+  topBlocked     Json?  // Array of {namespace, podName, binary, policy, count}
+
+  // Coverage gaps (processes not covered by any policy)
+  coverageGaps   Json?  // Array of {namespace, podName, binary, count}
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([clusterId, hour])
+  @@index([clusterId, hour])
+  @@map("process_validation_summaries")
+}
+
+// Individual process validation events (kept short-term for debugging)
+model ProcessValidationEvent {
+  id          String   @id @default(cuid())
+  clusterId   String
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  timestamp   DateTime
+  verdict     ProcessValidationVerdict
+
+  // Process context
+  namespace     String
+  podName       String?
+  nodeName      String?
+  binary        String    // Full path: /bin/bash, /usr/bin/curl
+  arguments     String?   // Command line arguments (truncated)
+  parentBinary  String?   // Parent process binary
+
+  // Syscall context (if kprobe event)
+  syscall       String?
+  filePath      String?
+
+  // Policy match info
+  matchedPolicy String?   // TracingPolicy name if applicable
+  action        String?   // SIGKILL, OVERRIDE, POST (allowed)
+  reason        String?   // Human-readable explanation
+
+  createdAt   DateTime @default(now())
+
+  @@index([clusterId, timestamp])
+  @@index([clusterId, verdict])
+  @@index([timestamp]) // For TTL cleanup
+  @@map("process_validation_events")
+}
+
+enum ProcessValidationVerdict {
+  ALLOWED    // Process executed normally
+  BLOCKED    // Process killed by TracingPolicy (SIGKILL/OVERRIDE)
+  NO_POLICY  // No TracingPolicy governs this process
 }

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
+import {
+  simulateTracingPolicy,
+  type ProcessSummaryInput,
+} from "~/lib/tetragon-policy-evaluator";
 
 // Use orgProtectedProcedure for all simulation operations (requires organization)
 const protectedProcedure = orgProtectedProcedure;
@@ -452,5 +456,169 @@ export const simulationRouter = createTRPCRouter({
         content: JSON.stringify(exportData, null, 2),
         mimeType: "application/json",
       };
+    }),
+
+  // Simulate a Tetragon TracingPolicy against ProcessSummary data (SaaS-side)
+  simulateTetragonPolicy: protectedProcedure
+    .input(
+      z.object({
+        policyId: z.string(),
+        clusterId: z.string(),
+        daysToAnalyze: z.number().min(1).max(30).default(7),
+        name: z.string().optional(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify policy belongs to organization and is a Tetragon policy
+      const policy = await ctx.db.policy.findFirst({
+        where: {
+          id: input.policyId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!policy) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      if (policy.type !== "TETRAGON") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Policy must be a TETRAGON TracingPolicy for process simulation",
+        });
+      }
+
+      // Verify cluster belongs to organization
+      const cluster = await ctx.db.cluster.findFirst({
+        where: {
+          id: input.clusterId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!cluster) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Cluster not found",
+        });
+      }
+
+      // Calculate time range
+      const endTime = new Date();
+      const startTime = new Date();
+      startTime.setDate(startTime.getDate() - input.daysToAnalyze);
+
+      // Create simulation record (mark as RUNNING since we'll complete it synchronously)
+      const simulation = await ctx.db.simulation.create({
+        data: {
+          name: input.name ?? `${policy.name} process simulation`,
+          description: input.description ?? `Tetragon simulation for ${policy.name} on ${cluster.name}`,
+          status: "RUNNING",
+          startTime,
+          endTime,
+          organizationId: ctx.organizationId,
+          clusterId: input.clusterId,
+          policyId: input.policyId,
+          runnerId: ctx.userId,
+        },
+      });
+
+      try {
+        // Fetch ProcessSummary data for the cluster within the time range
+        const processSummaries = await ctx.db.processSummary.findMany({
+          where: {
+            clusterId: input.clusterId,
+            // Get summaries within the time window
+            windowEnd: {
+              gte: startTime,
+              lte: endTime,
+            },
+          },
+        });
+
+        // Transform ProcessSummary records to the format expected by the evaluator
+        const processInputs: ProcessSummaryInput[] = processSummaries.map((ps) => ({
+          id: ps.id,
+          namespace: ps.namespace,
+          podName: ps.podName,
+          processName: ps.processName,
+          execCount: ps.execCount,
+          syscallCounts: ps.syscallCounts as Record<string, number> | null,
+        }));
+
+        // Run the simulation
+        const simulationResult = simulateTracingPolicy(policy.content, processInputs);
+
+        // Update simulation with results (serialize to JSON-safe format)
+        const completedSimulation = await ctx.db.simulation.update({
+          where: { id: simulation.id },
+          data: {
+            status: "COMPLETED",
+            completedAt: new Date(),
+            flowsAnalyzed: simulationResult.totalProcesses,
+            flowsAllowed: simulationResult.wouldAllowCount,
+            flowsDenied: simulationResult.wouldBlockCount,
+            flowsChanged: simulationResult.wouldBlockCount, // For Tetragon, blocked = would be new enforcement
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            results: JSON.parse(JSON.stringify({
+              type: "TETRAGON",
+              policyName: simulationResult.policyName,
+              policyNamespace: simulationResult.policyNamespace,
+              totalProcesses: simulationResult.totalProcesses,
+              totalExecs: simulationResult.totalExecs,
+              wouldBlockCount: simulationResult.wouldBlockCount,
+              wouldBlockExecs: simulationResult.wouldBlockExecs,
+              wouldAllowCount: simulationResult.wouldAllowCount,
+              wouldAllowExecs: simulationResult.wouldAllowExecs,
+              breakdownByNamespace: simulationResult.breakdownByNamespace,
+              sampleBlockedProcesses: simulationResult.sampleBlockedProcesses,
+              sampleAllowedProcesses: simulationResult.sampleAllowedProcesses,
+            })),
+          },
+          include: {
+            policy: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+              },
+            },
+            cluster: {
+              select: {
+                id: true,
+                name: true,
+                provider: true,
+              },
+            },
+          },
+        });
+
+        return {
+          simulation: completedSimulation,
+          results: simulationResult,
+        };
+      } catch (error) {
+        // Mark simulation as failed
+        await ctx.db.simulation.update({
+          where: { id: simulation.id },
+          data: {
+            status: "FAILED",
+            completedAt: new Date(),
+            results: {
+              type: "TETRAGON",
+              error: error instanceof Error ? error.message : "Unknown error",
+            },
+          },
+        });
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Simulation failed",
+        });
+      }
     }),
 });

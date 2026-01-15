@@ -6,6 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
 import { trpc } from "~/lib/trpc";
 
+// Top-level validation type tabs
+type ValidationType = "network" | "process";
+
 function formatNumber(num: number): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
@@ -235,9 +238,521 @@ function BlockedFlowsTable({
   );
 }
 
+// ============================================================================
+// Process Validation Components (Tetragon)
+// ============================================================================
+
+// Process coverage gaps table
+function ProcessCoverageGapsTable({
+  gaps,
+}: {
+  gaps: Array<{
+    namespace: string;
+    podName?: string;
+    binary: string;
+    count: number;
+  }>;
+}) {
+  if (gaps.length === 0) {
+    return (
+      <div className="text-center text-muted py-8">
+        No coverage gaps detected - all processes are governed by policies
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-card-border">
+            <th className="text-left py-2 px-3 text-muted font-medium">Namespace</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Pod</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Binary</th>
+            <th className="text-right py-2 px-3 text-muted font-medium">Exec Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {gaps.map((gap, idx) => (
+            <tr key={idx} className="border-b border-card-border/50 hover:bg-card-hover">
+              <td className="py-2 px-3 font-medium text-foreground">{gap.namespace}</td>
+              <td className="py-2 px-3 text-muted truncate max-w-[200px]">
+                {gap.podName ?? "—"}
+              </td>
+              <td className="py-2 px-3">
+                <code className="text-xs bg-card-hover px-1 py-0.5 rounded">
+                  {gap.binary}
+                </code>
+              </td>
+              <td className="py-2 px-3 text-right font-medium text-warning">
+                {formatNumber(gap.count)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Blocked processes table
+function BlockedProcessesTable({
+  processes,
+}: {
+  processes: Array<{
+    id: string;
+    timestamp: string;
+    namespace: string;
+    podName?: string | null;
+    binary: string;
+    arguments?: string | null;
+    syscall?: string | null;
+    matchedPolicy?: string | null;
+    action?: string | null;
+    reason?: string | null;
+  }>;
+}) {
+  if (processes.length === 0) {
+    return (
+      <div className="text-center text-muted py-8">
+        No blocked processes in this time period
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-card-border">
+            <th className="text-left py-2 px-3 text-muted font-medium">Time</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Namespace</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Binary</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Syscall</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Policy</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {processes.map((proc) => (
+            <tr key={proc.id} className="border-b border-card-border/50 hover:bg-card-hover">
+              <td className="py-2 px-3 text-xs text-muted whitespace-nowrap">
+                {new Date(proc.timestamp).toLocaleTimeString()}
+              </td>
+              <td className="py-2 px-3">
+                <div className="font-medium text-foreground">{proc.namespace}</div>
+                {proc.podName && (
+                  <div className="text-xs text-muted truncate max-w-[150px]">
+                    {proc.podName}
+                  </div>
+                )}
+              </td>
+              <td className="py-2 px-3">
+                <code className="text-xs bg-card-hover px-1 py-0.5 rounded">
+                  {proc.binary}
+                </code>
+              </td>
+              <td className="py-2 px-3 text-muted">
+                {proc.syscall ?? "—"}
+              </td>
+              <td className="py-2 px-3">
+                {proc.matchedPolicy ? (
+                  <Badge variant="danger">{proc.matchedPolicy}</Badge>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+              </td>
+              <td className="py-2 px-3">
+                <Badge variant={proc.action === "Sigkill" ? "danger" : "warning"}>
+                  {proc.action ?? "Block"}
+                </Badge>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Top blocked binaries table
+function TopBlockedBinariesTable({
+  binaries,
+}: {
+  binaries: Array<{
+    namespace: string;
+    podName?: string;
+    binary: string;
+    policy: string;
+    count: number;
+  }>;
+}) {
+  if (binaries.length === 0) {
+    return (
+      <div className="text-center text-muted py-8">
+        No blocked binaries in this time period
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-card-border">
+            <th className="text-left py-2 px-3 text-muted font-medium">Binary</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Namespace</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Policy</th>
+            <th className="text-right py-2 px-3 text-muted font-medium">Block Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {binaries.map((bin, idx) => (
+            <tr key={idx} className="border-b border-card-border/50 hover:bg-card-hover">
+              <td className="py-2 px-3">
+                <code className="text-xs bg-card-hover px-1 py-0.5 rounded">
+                  {bin.binary}
+                </code>
+              </td>
+              <td className="py-2 px-3 font-medium text-foreground">{bin.namespace}</td>
+              <td className="py-2 px-3">
+                <Badge variant="muted">{bin.policy}</Badge>
+              </td>
+              <td className="py-2 px-3 text-right font-medium text-danger">
+                {formatNumber(bin.count)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Process Validation Content Component
+function ProcessValidationContent({
+  selectedClusterId,
+  timeRange,
+}: {
+  selectedClusterId: string;
+  timeRange: number;
+}) {
+  const [activeTab, setActiveTab] = useState<"overview" | "gaps" | "blocked" | "top">("overview");
+
+  // Fetch process validation data
+  const { data: summary, isLoading: summaryLoading } = trpc.processValidation.getSummary.useQuery(
+    { clusterId: selectedClusterId, hours: timeRange },
+    { enabled: !!selectedClusterId, refetchInterval: 30000 }
+  );
+
+  const { data: coverageGaps } = trpc.processValidation.getCoverageGaps.useQuery(
+    { clusterId: selectedClusterId, hours: timeRange, limit: 20 },
+    { enabled: !!selectedClusterId && activeTab === "gaps" }
+  );
+
+  const { data: blockedProcesses } = trpc.processValidation.getBlockedProcesses.useQuery(
+    { clusterId: selectedClusterId, hours: timeRange, limit: 50 },
+    { enabled: !!selectedClusterId && activeTab === "blocked" }
+  );
+
+  const { data: topBlocked } = trpc.processValidation.getTopBlockedBinaries.useQuery(
+    { clusterId: selectedClusterId, hours: timeRange, limit: 10 },
+    { enabled: !!selectedClusterId && activeTab === "top" }
+  );
+
+  // Org-wide process validation stats
+  const { data: orgStats } = trpc.processValidation.getOrgStats.useQuery(
+    { hours: timeRange },
+    { refetchInterval: 60000 }
+  );
+
+  // Loading state
+  if (summaryLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // No cluster selected
+  if (!selectedClusterId) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <p className="text-muted">Select a cluster to view process validation data</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {/* Organization-wide stats */}
+      {orgStats && (
+        <div className="mb-8 grid grid-cols-4 gap-4">
+          <Card className="text-center">
+            <CardContent className="py-4">
+              <p className="text-2xl font-bold text-foreground">
+                {formatNumber(orgStats.totals.allowed + orgStats.totals.blocked + orgStats.totals.noPolicy)}
+              </p>
+              <p className="text-sm text-muted">Total Processes Validated</p>
+            </CardContent>
+          </Card>
+          <Card className="text-center">
+            <CardContent className="py-4">
+              <p className="text-2xl font-bold text-success">
+                {formatNumber(orgStats.totals.allowed)}
+              </p>
+              <p className="text-sm text-muted">Allowed</p>
+            </CardContent>
+          </Card>
+          <Card className="text-center">
+            <CardContent className="py-4">
+              <p className="text-2xl font-bold text-danger">
+                {formatNumber(orgStats.totals.blocked)}
+              </p>
+              <p className="text-sm text-muted">Blocked</p>
+            </CardContent>
+          </Card>
+          <Card className="text-center">
+            <CardContent className="py-4">
+              <p className="text-2xl font-bold text-warning">
+                {formatNumber(orgStats.totals.noPolicy)}
+              </p>
+              <p className="text-sm text-muted">No Policy (Gaps)</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="mb-6 flex gap-1 border-b border-card-border">
+        <button
+          onClick={() => setActiveTab("overview")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "overview"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Overview
+        </button>
+        <button
+          onClick={() => setActiveTab("gaps")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "gaps"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Coverage Gaps
+          {summary && summary.totals.noPolicy > 0 && (
+            <Badge variant="warning" className="ml-2">
+              {formatNumber(summary.totals.noPolicy)}
+            </Badge>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("blocked")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "blocked"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Blocked Events
+        </button>
+        <button
+          onClick={() => setActiveTab("top")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "top"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Top Blocked
+        </button>
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "overview" && summary && (
+        <div className="grid grid-cols-3 gap-6">
+          {/* Main content */}
+          <div className="col-span-2 space-y-6">
+            {/* Verdict breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Process Verdict Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <VerdictBreakdown
+                  allowed={summary.totals.allowed}
+                  blocked={summary.totals.blocked}
+                  noPolicy={summary.totals.noPolicy}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Hourly breakdown */}
+            {summary.hourlyBreakdown.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Hourly Trend</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-end gap-1 h-32">
+                    {summary.hourlyBreakdown.slice(-24).map((hour, idx) => {
+                      const total = hour.allowed + hour.blocked + hour.noPolicy;
+                      const maxTotal = Math.max(
+                        ...summary.hourlyBreakdown.slice(-24).map(
+                          (h) => h.allowed + h.blocked + h.noPolicy
+                        )
+                      );
+                      const height = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="flex-1 bg-primary/20 rounded-t hover:bg-primary/30 transition-colors"
+                          style={{ height: `${height}%` }}
+                          title={`${new Date(hour.hour).toLocaleString()}: ${formatNumber(total)} processes`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between text-xs text-muted mt-2">
+                    <span>
+                      {summary.hourlyBreakdown.length > 0 && summary.hourlyBreakdown[0]
+                        ? new Date(summary.hourlyBreakdown[0].hour).toLocaleDateString()
+                        : ""}
+                    </span>
+                    <span>Now</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Coverage stats */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Coverage</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-muted">Policy Coverage</span>
+                    <span className="font-medium text-foreground">
+                      {formatPercentage(summary.coveragePercentage)}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-card-hover rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-success rounded-full transition-all"
+                      style={{ width: `${summary.coveragePercentage}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-card-border">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">Total Processes</span>
+                    <span className="font-medium text-foreground">
+                      {formatNumber(summary.totalProcesses)}
+                    </span>
+                  </div>
+                </div>
+
+                {summary.trend !== 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">Trend</span>
+                    <span
+                      className={`font-medium ${
+                        summary.trend > 0 ? "text-success" : "text-danger"
+                      }`}
+                    >
+                      {summary.trend > 0 ? "+" : ""}
+                      {formatPercentage(summary.trend)}
+                    </span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Cluster info */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Cluster</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="font-medium text-foreground">{summary.cluster.name}</p>
+                <p className="text-sm text-muted mt-1">
+                  Last {timeRange} hours
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "gaps" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Process Coverage Gaps</CardTitle>
+              <p className="text-sm text-muted">
+                Processes with no governing TracingPolicy
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ProcessCoverageGapsTable gaps={coverageGaps?.gaps ?? []} />
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === "blocked" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Blocked Process Events</CardTitle>
+              <p className="text-sm text-muted">
+                Recent processes blocked by TracingPolicy
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <BlockedProcessesTable processes={blockedProcesses?.blockedProcesses ?? []} />
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === "top" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Top Blocked Binaries</CardTitle>
+              <p className="text-sm text-muted">
+                Most frequently blocked binaries
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <TopBlockedBinariesTable binaries={topBlocked?.topBlocked ?? []} />
+          </CardContent>
+        </Card>
+      )}
+    </>
+  );
+}
+
 export default function ValidationDashboardPage() {
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const [timeRange, setTimeRange] = useState<number>(24);
+  const [validationType, setValidationType] = useState<ValidationType>("network");
   const [activeTab, setActiveTab] = useState<"overview" | "gaps" | "blocked">("overview");
 
   // Fetch clusters
@@ -274,7 +789,7 @@ export default function ValidationDashboardPage() {
   return (
     <AppShell>
       {/* Header */}
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Policy Validation</h1>
           <p className="mt-1 text-muted">
@@ -315,45 +830,82 @@ export default function ValidationDashboardPage() {
         </div>
       </div>
 
-      {/* Organization-wide stats */}
-      {orgStats && (
-        <div className="mb-8 grid grid-cols-4 gap-4">
-          <Card className="text-center">
-            <CardContent className="py-4">
-              <p className="text-2xl font-bold text-foreground">
-                {formatNumber(orgStats.totals.allowed + orgStats.totals.blocked + orgStats.totals.noPolicy)}
-              </p>
-              <p className="text-sm text-muted">Total Flows Validated</p>
-            </CardContent>
-          </Card>
-          <Card className="text-center">
-            <CardContent className="py-4">
-              <p className="text-2xl font-bold text-success">
-                {formatNumber(orgStats.totals.allowed)}
-              </p>
-              <p className="text-sm text-muted">Allowed</p>
-            </CardContent>
-          </Card>
-          <Card className="text-center">
-            <CardContent className="py-4">
-              <p className="text-2xl font-bold text-danger">
-                {formatNumber(orgStats.totals.blocked)}
-              </p>
-              <p className="text-sm text-muted">Blocked</p>
-            </CardContent>
-          </Card>
-          <Card className="text-center">
-            <CardContent className="py-4">
-              <p className="text-2xl font-bold text-warning">
-                {formatNumber(orgStats.totals.noPolicy)}
-              </p>
-              <p className="text-sm text-muted">No Policy (Gaps)</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Top-level validation type tabs */}
+      <div className="mb-8 flex gap-2">
+        <button
+          onClick={() => setValidationType("network")}
+          className={`px-6 py-3 rounded-lg font-medium text-sm transition-colors ${
+            validationType === "network"
+              ? "bg-primary text-white"
+              : "bg-card hover:bg-card-hover text-foreground border border-card-border"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Network Flows
+          </span>
+        </button>
+        <button
+          onClick={() => setValidationType("process")}
+          className={`px-6 py-3 rounded-lg font-medium text-sm transition-colors ${
+            validationType === "process"
+              ? "bg-primary text-white"
+              : "bg-card hover:bg-card-hover text-foreground border border-card-border"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+            </svg>
+            Process Execution
+          </span>
+        </button>
+      </div>
 
-      {/* Tabs */}
+      {/* Network Flows Content */}
+      {validationType === "network" && (
+        <>
+          {/* Organization-wide stats */}
+          {orgStats && (
+            <div className="mb-8 grid grid-cols-4 gap-4">
+              <Card className="text-center">
+                <CardContent className="py-4">
+                  <p className="text-2xl font-bold text-foreground">
+                    {formatNumber(orgStats.totals.allowed + orgStats.totals.blocked + orgStats.totals.noPolicy)}
+                  </p>
+                  <p className="text-sm text-muted">Total Flows Validated</p>
+                </CardContent>
+              </Card>
+              <Card className="text-center">
+                <CardContent className="py-4">
+                  <p className="text-2xl font-bold text-success">
+                    {formatNumber(orgStats.totals.allowed)}
+                  </p>
+                  <p className="text-sm text-muted">Allowed</p>
+                </CardContent>
+              </Card>
+              <Card className="text-center">
+                <CardContent className="py-4">
+                  <p className="text-2xl font-bold text-danger">
+                    {formatNumber(orgStats.totals.blocked)}
+                  </p>
+                  <p className="text-sm text-muted">Blocked</p>
+                </CardContent>
+              </Card>
+              <Card className="text-center">
+                <CardContent className="py-4">
+                  <p className="text-2xl font-bold text-warning">
+                    {formatNumber(orgStats.totals.noPolicy)}
+                  </p>
+                  <p className="text-sm text-muted">No Policy (Gaps)</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-card-border">
         <button
           onClick={() => setActiveTab("overview")}
@@ -565,6 +1117,16 @@ export default function ValidationDashboardPage() {
             </Card>
           )}
         </>
+      )}
+        </>
+      )}
+
+      {/* Process Execution Content */}
+      {validationType === "process" && (
+        <ProcessValidationContent
+          selectedClusterId={selectedClusterId}
+          timeRange={timeRange}
+        />
       )}
     </AppShell>
   );

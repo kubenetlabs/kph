@@ -65,7 +65,7 @@ export default function SimulationPage() {
   // Fetch clusters for the dropdown
   const { data: clustersData } = trpc.cluster.list.useQuery();
 
-  // Create simulation mutation
+  // Create simulation mutation (for network policies)
   const createSimulation = trpc.simulation.create.useMutation({
     onSuccess: () => {
       setIsNewSimModalOpen(false);
@@ -74,18 +74,45 @@ export default function SimulationPage() {
     },
   });
 
-  const handleNewSimulation = () => {
-    if (!selectedPolicyId || !selectedClusterId) return;
-    createSimulation.mutate({
-      policyId: selectedPolicyId,
-      clusterId: selectedClusterId,
-      daysToAnalyze: simulationDays,
-    });
-  };
+  // Tetragon simulation mutation (for process policies - runs immediately SaaS-side)
+  const simulateTetragon = trpc.simulation.simulateTetragonPolicy.useMutation({
+    onSuccess: () => {
+      setIsNewSimModalOpen(false);
+      setSelectedPolicyId("");
+      setSelectedClusterId("");
+    },
+  });
 
   const policies = policiesData?.policies ?? [];
   const clusters = clustersData ?? [];
   const simulationList = simulations?.simulations ?? [];
+
+  // Check if selected policy is Tetragon type
+  const selectedPolicy = policies.find(p => p.id === selectedPolicyId);
+  const isTetragonPolicy = selectedPolicy?.type === "TETRAGON";
+
+  const handleNewSimulation = () => {
+    if (!selectedPolicyId || !selectedClusterId) return;
+
+    if (isTetragonPolicy) {
+      // Use SaaS-side Tetragon simulation
+      simulateTetragon.mutate({
+        policyId: selectedPolicyId,
+        clusterId: selectedClusterId,
+        daysToAnalyze: simulationDays,
+      });
+    } else {
+      // Use operator-based network flow simulation
+      createSimulation.mutate({
+        policyId: selectedPolicyId,
+        clusterId: selectedClusterId,
+        daysToAnalyze: simulationDays,
+      });
+    }
+  };
+
+  const isCreatingSimulation = createSimulation.isPending || simulateTetragon.isPending;
+  const simulationError = createSimulation.error ?? simulateTetragon.error;
 
   // Calculate stats
   const totalSimulations = simulationList.length;
@@ -127,10 +154,19 @@ export default function SimulationPage() {
             <div>
               <h3 className="font-semibold text-foreground">How Time-Travel Simulation Works</h3>
               <p className="mt-1 text-sm text-muted">
-                Policy Hub captures all network flows in your clusters using eBPF. When you create or modify a policy,
-                you can replay 30-90 days of historical traffic to see exactly which connections would be allowed or
-                denied—before deploying to production. No more policy surprises.
+                Policy Hub captures all network flows and process executions using eBPF. When you create or modify a policy,
+                you can replay historical data to see exactly what would be allowed or blocked—before deploying to production.
               </p>
+              <div className="mt-2 flex gap-4 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-primary" />
+                  <span className="text-muted"><strong>Network Policies:</strong> Simulate against historical flows</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-accent" />
+                  <span className="text-muted"><strong>Tetragon Policies:</strong> Simulate against process executions</span>
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -290,32 +326,37 @@ export default function SimulationPage() {
                   </div>
 
                   {/* Results */}
-                  <div className="ml-8 grid grid-cols-4 gap-6 text-center">
-                    <div>
-                      <p className="text-lg font-semibold text-foreground">
-                        {formatNumber(sim.flowsAnalyzed ?? 0)}
-                      </p>
-                      <p className="text-xs text-muted">Flows</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-success">
-                        {sim.flowsAllowed !== null ? formatNumber(sim.flowsAllowed) : "—"}
-                      </p>
-                      <p className="text-xs text-muted">Allowed</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-danger">
-                        {sim.flowsDenied !== null ? formatNumber(sim.flowsDenied) : "—"}
-                      </p>
-                      <p className="text-xs text-muted">Denied</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-warning">
-                        {sim.flowsChanged !== null ? formatNumber(sim.flowsChanged) : "—"}
-                      </p>
-                      <p className="text-xs text-muted">Changed</p>
-                    </div>
-                  </div>
+                  {(() => {
+                    const simIsTetragon = sim.policy?.type === "TETRAGON";
+                    return (
+                      <div className="ml-8 grid grid-cols-4 gap-6 text-center">
+                        <div>
+                          <p className="text-lg font-semibold text-foreground">
+                            {formatNumber(sim.flowsAnalyzed ?? 0)}
+                          </p>
+                          <p className="text-xs text-muted">{simIsTetragon ? "Processes" : "Flows"}</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold text-success">
+                            {sim.flowsAllowed !== null ? formatNumber(sim.flowsAllowed) : "—"}
+                          </p>
+                          <p className="text-xs text-muted">Allowed</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold text-danger">
+                            {sim.flowsDenied !== null ? formatNumber(sim.flowsDenied) : "—"}
+                          </p>
+                          <p className="text-xs text-muted">{simIsTetragon ? "Blocked" : "Denied"}</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold text-warning">
+                            {sim.flowsChanged !== null ? formatNumber(sim.flowsChanged) : "—"}
+                          </p>
+                          <p className="text-xs text-muted">{simIsTetragon ? "Would Block" : "Changed"}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Progress bar for running simulations */}
@@ -425,10 +466,32 @@ export default function SimulationPage() {
 
           <div className="rounded-md bg-accent/10 p-3">
             <p className="text-sm text-muted">
-              The simulation will replay historical network flows against the selected policy
-              to show what would be allowed or denied if deployed.
+              {isTetragonPolicy ? (
+                <>
+                  <strong className="text-accent-light">Tetragon Process Policy:</strong> This simulation will evaluate
+                  historical process executions against the TracingPolicy to show what would be blocked or allowed.
+                </>
+              ) : (
+                <>
+                  The simulation will replay historical network flows against the selected policy
+                  to show what would be allowed or denied if deployed.
+                </>
+              )}
             </p>
           </div>
+
+          {isTetragonPolicy && (
+            <div className="rounded-md border border-success/30 bg-success/5 p-3">
+              <div className="flex items-center gap-2">
+                <svg className="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <p className="text-sm text-success">
+                  Tetragon simulations run instantly - no waiting for operator processing.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-4">
             <Button
@@ -439,15 +502,15 @@ export default function SimulationPage() {
             </Button>
             <Button
               onClick={handleNewSimulation}
-              disabled={!selectedPolicyId || !selectedClusterId || createSimulation.isPending}
-              isLoading={createSimulation.isPending}
+              disabled={!selectedPolicyId || !selectedClusterId || isCreatingSimulation}
+              isLoading={isCreatingSimulation}
             >
-              Start Simulation
+              {isTetragonPolicy ? "Run Simulation" : "Start Simulation"}
             </Button>
           </div>
-          {createSimulation.error && (
+          {simulationError && (
             <p className="mt-2 text-sm text-danger">
-              {createSimulation.error.message}
+              {simulationError.message}
             </p>
           )}
         </div>

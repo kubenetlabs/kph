@@ -4,6 +4,7 @@ import { clusterRouter } from "./cluster";
 import { simulationRouter } from "./simulation";
 import { deploymentRouter } from "./deployment";
 import { validationRouter } from "./validation";
+import { processValidationRouter } from "./process-validation";
 import { marketplaceRouter } from "./marketplace";
 import { onboardingRouter } from "./onboarding";
 import { topologyRouter } from "./topology";
@@ -20,6 +21,7 @@ export const appRouter = createTRPCRouter({
   simulation: simulationRouter,
   deployment: deploymentRouter,
   validation: validationRouter,
+  processValidation: processValidationRouter,
   marketplace: marketplaceRouter,
   onboarding: onboardingRouter,
   topology: topologyRouter,
