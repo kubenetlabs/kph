@@ -49,10 +49,87 @@ For Cilium Network Policies, remember:
 - Use toFQDNs for DNS-based egress rules
 
 For Tetragon Tracing Policies:
-- Use kprobes for kernel-level tracing
-- Use tracepoints for predefined kernel events
-- Define selectors to filter which processes/pods to monitor
-- Common syscalls: sys_execve, sys_open, sys_connect, sys_write
+- Use TracingPolicyNamespaced (apiVersion: cilium.io/v1alpha1) for namespace-scoped policies
+- Use TracingPolicy (apiVersion: cilium.io/v1alpha1) for cluster-wide policies (no namespace in metadata)
+- kprobes structure requires: call (string), syscall (boolean), and selectors (array)
+- selectors contain: matchBinaries, matchArgs, matchNamespaces, and matchActions
+- matchActions use "action: Sigkill" to kill the process, "action: Signal" with "signal: SIGKILL" also works
+- matchBinaries uses "operator: In" with "values:" array of full paths like "/bin/sh", "/bin/bash"
+
+CRITICAL: Tetragon TracingPolicy structure example for blocking shell execution:
+\`\`\`yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: block-shell-execution
+  namespace: target-namespace
+spec:
+  kprobes:
+  - call: "sys_execve"
+    syscall: true
+    selectors:
+    - matchBinaries:
+      - operator: In
+        values:
+        - /bin/sh
+        - /bin/bash
+        - /bin/zsh
+        - /bin/dash
+        - /bin/ash
+        - /usr/bin/sh
+        - /usr/bin/bash
+      matchActions:
+      - action: Sigkill
+\`\`\`
+
+Example for blocking file reads (e.g., /etc/shadow, service account tokens):
+\`\`\`yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: block-sensitive-file-reads
+  namespace: target-namespace
+spec:
+  kprobes:
+  - call: "sys_openat"
+    syscall: true
+    args:
+    - index: 1
+      type: "string"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: Prefix
+        values:
+        - /etc/shadow
+        - /var/run/secrets/kubernetes.io/serviceaccount
+      matchActions:
+      - action: Sigkill
+\`\`\`
+
+Example for blocking network tools:
+\`\`\`yaml
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: block-network-tools
+  namespace: target-namespace
+spec:
+  kprobes:
+  - call: "sys_execve"
+    syscall: true
+    selectors:
+    - matchBinaries:
+      - operator: In
+        values:
+        - /usr/bin/curl
+        - /usr/bin/wget
+        - /usr/bin/nc
+        - /usr/bin/netcat
+        - /bin/nc
+      matchActions:
+      - action: Sigkill
+\`\`\`
 
 Respond with ONLY the YAML content, starting with "apiVersion:" and nothing else.`;
 
