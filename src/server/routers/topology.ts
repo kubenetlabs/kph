@@ -455,6 +455,8 @@ export const topologyRouter = createTRPCRouter({
       ];
 
       // Query using OR to support both old records (timestamp) and properly tagged records (windowStart)
+      console.log("[Topology] Querying process summaries for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange);
+
       const processSummaries = await ctx.db.processSummary.findMany({
         where: {
           clusterId: input.clusterId,
@@ -467,6 +469,8 @@ export const topologyRouter = createTRPCRouter({
         orderBy: { timestamp: "desc" },
         take: 500,
       });
+
+      console.log("[Topology] Found", processSummaries.length, "process summaries");
 
       // Aggregate and categorize events
       interface ProcessEvent {
@@ -524,6 +528,8 @@ export const topologyRouter = createTRPCRouter({
       const filteredEvents = input.suspicious
         ? events.filter((e) => e.isSuspicious)
         : events;
+
+      console.log("[Topology] After categorization:", events.length, "events, suspicious filter:", input.suspicious, "filtered to:", filteredEvents.length);
 
       // Summary stats
       const summary = {
