@@ -425,6 +425,7 @@ export const topologyRouter = createTRPCRouter({
 
   /**
    * Get recent process events (Tetragon telemetry) for runtime security visibility
+   * Uses processValidationEvent table which receives data from the collector
    */
   getProcessEvents: orgProtectedProcedure
     .input(
@@ -456,71 +457,54 @@ export const topologyRouter = createTRPCRouter({
         "cat", "head", "tail", "less", "more", // File readers (suspicious when accessing sensitive files)
       ];
 
-      // Sensitive file paths that indicate suspicious activity when accessed
-      const sensitiveFilePaths = [
-        "/etc/shadow",
-        "/etc/passwd",
-        "/etc/sudoers",
-        "/var/run/secrets",
-        "/root/.ssh",
-        "/.ssh/",
-        "/proc/",
-        "serviceaccount/token",
-      ];
-
-      // Query using OR to support both old records (timestamp) and properly tagged records (windowStart)
-      console.log("[Topology] Querying process summaries for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange, "suspicious:", input.suspicious);
+      console.log("[Topology] Querying processValidationEvent for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange, "suspicious:", input.suspicious);
 
       // Build suspicious process filter for database-level filtering
-      // This ensures we find attack events even when buried under infrastructure noise
+      // Uses 'binary' field from processValidationEvent table
       const suspiciousProcessFilter = input.suspicious
         ? {
             OR: [
-              { processName: { contains: "/sh" } },
-              { processName: { contains: "/bash" } },
-              { processName: { contains: "/zsh" } },
-              { processName: { contains: "/dash" } },
-              { processName: { contains: "/ash" } },
-              { processName: { contains: "/curl" } },
-              { processName: { contains: "/wget" } },
-              { processName: { contains: "/nc" } },
-              { processName: { contains: "/netcat" } },
-              { processName: { contains: "/python" } },
-              { processName: { contains: "/perl" } },
-              { processName: { contains: "/ruby" } },
-              { processName: { contains: "/chmod" } },
-              { processName: { contains: "/chown" } },
-              { processName: { contains: "/base64" } },
-              { processName: { contains: "/nmap" } },
+              { binary: { contains: "/sh" } },
+              { binary: { contains: "/bash" } },
+              { binary: { contains: "/zsh" } },
+              { binary: { contains: "/dash" } },
+              { binary: { contains: "/ash" } },
+              { binary: { contains: "/curl" } },
+              { binary: { contains: "/wget" } },
+              { binary: { contains: "/nc" } },
+              { binary: { contains: "/netcat" } },
+              { binary: { contains: "/python" } },
+              { binary: { contains: "/perl" } },
+              { binary: { contains: "/ruby" } },
+              { binary: { contains: "/chmod" } },
+              { binary: { contains: "/chown" } },
+              { binary: { contains: "/base64" } },
+              { binary: { contains: "/nmap" } },
               // File readers - often used to access sensitive files
-              { processName: { contains: "/cat" } },
-              { processName: { contains: "/head" } },
-              { processName: { contains: "/tail" } },
-              { processName: { contains: "/less" } },
-              { processName: { contains: "/more" } },
+              { binary: { contains: "/cat" } },
+              { binary: { contains: "/head" } },
+              { binary: { contains: "/tail" } },
+              { binary: { contains: "/less" } },
+              { binary: { contains: "/more" } },
             ],
           }
         : {};
 
-      const processSummaries = await ctx.db.processSummary.findMany({
+      // Query processValidationEvent table (populated by collector via /api/operator/process-validation)
+      const processEvents = await ctx.db.processValidationEvent.findMany({
         where: {
           AND: [
             { clusterId: input.clusterId },
-            {
-              OR: [
-                { timestamp: { gte: since } },
-                { windowStart: { gte: since } },
-              ],
-            },
+            { timestamp: { gte: since } },
             ...(input.namespace ? [{ namespace: input.namespace }] : []),
             ...(input.suspicious ? [suspiciousProcessFilter] : []),
           ],
         },
         orderBy: { timestamp: "desc" },
-        take: 100, // Reduced from 500 for faster initial load
+        take: 200,
       });
 
-      console.log("[Topology] Found", processSummaries.length, "process summaries (suspicious filter at DB level:", !!input.suspicious, ")");
+      console.log("[Topology] Found", processEvents.length, "process validation events (suspicious filter at DB level:", !!input.suspicious, ")");
 
       // Aggregate and categorize events
       interface ProcessEvent {
@@ -533,12 +517,13 @@ export const topologyRouter = createTRPCRouter({
         execCount: number;
         isSuspicious: boolean;
         category: "shell" | "network_tool" | "scripting" | "system" | "file_reader" | "normal";
-        syscallCounts: Record<string, number> | null;
+        arguments: string | null;
+        verdict: string;
       }
 
-      const events: ProcessEvent[] = processSummaries.map((ps) => {
+      const events: ProcessEvent[] = processEvents.map((pe) => {
         // Extract basename from full path (e.g., /bin/sh -> sh)
-        const fullPath = ps.processName.toLowerCase();
+        const fullPath = pe.binary.toLowerCase();
         const processName = fullPath.split("/").pop() ?? fullPath;
         let category: ProcessEvent["category"] = "normal";
         let isSuspicious = false;
@@ -566,20 +551,21 @@ export const topologyRouter = createTRPCRouter({
         }
 
         return {
-          id: ps.id,
-          timestamp: ps.timestamp,
-          namespace: ps.namespace,
-          podName: ps.podName,
+          id: pe.id,
+          timestamp: pe.timestamp,
+          namespace: pe.namespace,
+          podName: pe.podName ?? "unknown",
           processName: processName, // Return basename for display
-          fullPath: ps.processName, // Keep full path available
-          execCount: ps.execCount,
+          fullPath: pe.binary, // Keep full path available
+          execCount: 1, // Each event is one execution
           isSuspicious,
           category,
-          syscallCounts: ps.syscallCounts as Record<string, number> | null,
+          arguments: pe.arguments,
+          verdict: pe.verdict,
         };
       });
 
-      // Filter to suspicious only if requested
+      // Filter to suspicious only if requested (already filtered at DB level, but double-check)
       const filteredEvents = input.suspicious
         ? events.filter((e) => e.isSuspicious)
         : events;
