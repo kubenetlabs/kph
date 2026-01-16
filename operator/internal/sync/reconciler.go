@@ -482,6 +482,14 @@ func (r *Reconciler) ReconcilePolicy(ctx context.Context, mp *policyv1alpha1.Man
 	// Validate policy
 	if err := r.deployer.ValidatePolicy(mp); err != nil {
 		log.Error(err, "Policy validation failed")
+
+		// Report validation failure to SaaS
+		_, _ = r.saasClient.UpdatePolicyStatus(ctx, mp.Spec.PolicyID, saas.UpdatePolicyStatusRequest{
+			Status:  "FAILED",
+			Error:   err.Error(),
+			Version: mp.Spec.Version,
+		})
+
 		return r.updatePolicyStatus(ctx, mp, policyv1alpha1.ManagedPolicyPhaseFailed, err.Error())
 	}
 
