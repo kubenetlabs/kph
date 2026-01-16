@@ -99,9 +99,27 @@ export async function POST(request: NextRequest) {
     let summariesUpserted = 0;
     let eventsCreated = 0;
 
+    // Log incoming data for debugging
+    console.log("[Validation API] Received data:", {
+      clusterId: auth.clusterId,
+      summaryCount: summaries?.length ?? 0,
+      eventCount: events?.length ?? 0,
+      summaries: summaries?.map(s => ({
+        hour: s.hour,
+        allowed: s.allowedCount,
+        blocked: s.blockedCount,
+        noPolicy: s.noPolicyCount,
+      })),
+    });
+
     // Upsert validation summaries
     if (summaries && summaries.length > 0) {
       for (const summary of summaries) {
+        console.log("[Validation API] Upserting summary:", {
+          clusterId: auth.clusterId,
+          hour: summary.hour,
+          blocked: summary.blockedCount,
+        });
         await db.validationSummary.upsert({
           where: {
             clusterId_hour: {
@@ -155,13 +173,19 @@ export async function POST(request: NextRequest) {
       eventsCreated = result.count;
     }
 
+    console.log("[Validation API] Successfully processed:", {
+      clusterId: auth.clusterId,
+      summariesUpserted,
+      eventsCreated,
+    });
+
     return NextResponse.json({
       success: true,
       summariesUpserted,
       eventsCreated,
     });
   } catch (error) {
-    console.error("Error processing validation data:", error);
+    console.error("[Validation API] Error processing validation data:", error);
     return NextResponse.json(
       {
         success: false,
