@@ -453,6 +453,19 @@ export const topologyRouter = createTRPCRouter({
         "chmod", "chown", // Permission changes
         "base64", "xxd", // Encoding tools
         "nmap", "masscan", // Scanning tools
+        "cat", "head", "tail", "less", "more", // File readers (suspicious when accessing sensitive files)
+      ];
+
+      // Sensitive file paths that indicate suspicious activity when accessed
+      const sensitiveFilePaths = [
+        "/etc/shadow",
+        "/etc/passwd",
+        "/etc/sudoers",
+        "/var/run/secrets",
+        "/root/.ssh",
+        "/.ssh/",
+        "/proc/",
+        "serviceaccount/token",
       ];
 
       // Query using OR to support both old records (timestamp) and properly tagged records (windowStart)
@@ -479,6 +492,12 @@ export const topologyRouter = createTRPCRouter({
               { processName: { contains: "/chown" } },
               { processName: { contains: "/base64" } },
               { processName: { contains: "/nmap" } },
+              // File readers - often used to access sensitive files
+              { processName: { contains: "/cat" } },
+              { processName: { contains: "/head" } },
+              { processName: { contains: "/tail" } },
+              { processName: { contains: "/less" } },
+              { processName: { contains: "/more" } },
             ],
           }
         : {};
@@ -513,7 +532,7 @@ export const topologyRouter = createTRPCRouter({
         fullPath: string;
         execCount: number;
         isSuspicious: boolean;
-        category: "shell" | "network_tool" | "scripting" | "system" | "normal";
+        category: "shell" | "network_tool" | "scripting" | "system" | "file_reader" | "normal";
         syscallCounts: Record<string, number> | null;
       }
 
@@ -536,6 +555,11 @@ export const topologyRouter = createTRPCRouter({
           isSuspicious = true;
         } else if (["chmod", "chown", "base64", "xxd"].includes(processName)) {
           category = "system";
+          isSuspicious = true;
+        } else if (["cat", "head", "tail", "less", "more"].includes(processName)) {
+          // File readers are suspicious in containers - they're often used to
+          // read sensitive files like /etc/shadow or service account tokens
+          category = "file_reader";
           isSuspicious = true;
         } else if (suspiciousBinaries.includes(processName)) {
           isSuspicious = true;
@@ -569,6 +593,7 @@ export const topologyRouter = createTRPCRouter({
         shellExecutions: filteredEvents.filter((e) => e.category === "shell").length,
         networkTools: filteredEvents.filter((e) => e.category === "network_tool").length,
         scriptingLanguages: filteredEvents.filter((e) => e.category === "scripting").length,
+        fileReaders: filteredEvents.filter((e) => e.category === "file_reader").length,
         uniqueNamespaces: [...new Set(filteredEvents.map((e) => e.namespace))].length,
         uniquePods: [...new Set(filteredEvents.map((e) => `${e.namespace}/${e.podName}`))].length,
       };

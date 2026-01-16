@@ -15,6 +15,16 @@ interface CoverageGap {
   count: number;
 }
 
+interface BlockedFlow {
+  srcNamespace: string;
+  srcPodName?: string;
+  dstNamespace: string;
+  dstPodName?: string;
+  dstPort?: number;
+  policy: string;
+  count: number;
+}
+
 export const validationRouter = createTRPCRouter({
   // Get validation summary for a cluster
   getSummary: protectedProcedure
@@ -185,6 +195,74 @@ export const validationRouter = createTRPCRouter({
         cluster: { id: cluster.id, name: cluster.name },
         gaps: sortedGaps,
         totalGaps: gapMap.size,
+      };
+    }),
+
+  // Get top blocked flows (aggregated from summaries)
+  getTopBlocked: protectedProcedure
+    .input(
+      z.object({
+        clusterId: z.string(),
+        hours: z.number().int().min(1).max(168).default(24),
+        limit: z.number().int().min(1).max(100).default(20),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      // Verify cluster belongs to organization
+      const cluster = await ctx.db.cluster.findFirst({
+        where: {
+          id: input.clusterId,
+          organizationId: ctx.organizationId,
+        },
+      });
+
+      if (!cluster) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Cluster not found",
+        });
+      }
+
+      const startTime = new Date();
+      startTime.setHours(startTime.getHours() - input.hours);
+
+      // Get recent summaries
+      const summaries = await ctx.db.validationSummary.findMany({
+        where: {
+          clusterId: input.clusterId,
+          hour: { gte: startTime },
+        },
+        orderBy: { hour: "desc" },
+        take: 10,
+      });
+
+      // Aggregate top blocked from all summaries
+      const blockedMap = new Map<string, BlockedFlow>();
+
+      for (const summary of summaries) {
+        const blocked = summary.topBlocked as BlockedFlow[] | null;
+        if (!blocked) continue;
+
+        for (const flow of blocked) {
+          const key = `${flow.srcNamespace}/${flow.srcPodName ?? "*"}:${flow.dstNamespace}/${flow.dstPodName ?? "*"}:${flow.policy}`;
+          const existing = blockedMap.get(key);
+          if (existing) {
+            existing.count += flow.count;
+          } else {
+            blockedMap.set(key, { ...flow });
+          }
+        }
+      }
+
+      // Sort by count and return top N
+      const sortedBlocked = Array.from(blockedMap.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, input.limit);
+
+      return {
+        cluster: { id: cluster.id, name: cluster.name },
+        topBlocked: sortedBlocked,
+        totalBlocked: blockedMap.size,
       };
     }),
 

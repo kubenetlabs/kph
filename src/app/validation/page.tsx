@@ -743,11 +743,85 @@ function ProcessValidationContent({
   );
 }
 
+// Top blocked flows table component
+function TopBlockedFlowsTable({
+  flows,
+}: {
+  flows: Array<{
+    srcNamespace: string;
+    srcPodName?: string;
+    dstNamespace: string;
+    dstPodName?: string;
+    dstPort?: number;
+    policy: string;
+    count: number;
+  }>;
+}) {
+  if (flows.length === 0) {
+    return (
+      <div className="text-center text-muted py-8">
+        No blocked flows in this time period
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-card-border">
+            <th className="text-left py-2 px-3 text-muted font-medium">Source</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Destination</th>
+            <th className="text-center py-2 px-3 text-muted font-medium">Port</th>
+            <th className="text-left py-2 px-3 text-muted font-medium">Policy</th>
+            <th className="text-right py-2 px-3 text-muted font-medium">Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {flows.map((flow, idx) => (
+            <tr key={idx} className="border-b border-card-border/50 hover:bg-card-hover">
+              <td className="py-2 px-3">
+                <div className="font-medium text-foreground">{flow.srcNamespace}</div>
+                {flow.srcPodName && (
+                  <div className="text-xs text-muted truncate max-w-[150px]">
+                    {flow.srcPodName}
+                  </div>
+                )}
+              </td>
+              <td className="py-2 px-3">
+                <div className="font-medium text-foreground">{flow.dstNamespace}</div>
+                {flow.dstPodName && (
+                  <div className="text-xs text-muted truncate max-w-[150px]">
+                    {flow.dstPodName}
+                  </div>
+                )}
+              </td>
+              <td className="py-2 px-3 text-center">
+                {flow.dstPort ? (
+                  <Badge variant="muted">{flow.dstPort}</Badge>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+              </td>
+              <td className="py-2 px-3">
+                <Badge variant="danger">{flow.policy || "Unknown"}</Badge>
+              </td>
+              <td className="py-2 px-3 text-right font-medium text-danger">
+                {formatNumber(flow.count)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ValidationDashboardPage() {
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const [timeRange, setTimeRange] = useState<number>(24);
   const [validationType, setValidationType] = useState<ValidationType>("network");
-  const [activeTab, setActiveTab] = useState<"overview" | "gaps" | "blocked">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "gaps" | "blocked" | "top">("overview");
 
   // Fetch clusters
   const { data: clusters } = trpc.cluster.list.useQuery();
@@ -772,6 +846,11 @@ export default function ValidationDashboardPage() {
   const { data: blockedFlows } = trpc.validation.getBlockedFlows.useQuery(
     { clusterId: selectedClusterId, hours: timeRange, limit: 50 },
     { enabled: !!selectedClusterId && activeTab === "blocked" }
+  );
+
+  const { data: topBlocked } = trpc.validation.getTopBlocked.useQuery(
+    { clusterId: selectedClusterId, hours: timeRange, limit: 20 },
+    { enabled: !!selectedClusterId && activeTab === "top" }
   );
 
   return (
@@ -929,6 +1008,16 @@ export default function ValidationDashboardPage() {
           }`}
         >
           Blocked Flows
+        </button>
+        <button
+          onClick={() => setActiveTab("top")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "top"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Top Blocked
         </button>
       </div>
 
@@ -1101,6 +1190,22 @@ export default function ValidationDashboardPage() {
               </CardHeader>
               <CardContent>
                 <BlockedFlowsTable flows={blockedFlows?.blockedFlows ?? []} />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === "top" && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Top Blocked Flows</CardTitle>
+                  <p className="text-sm text-muted">
+                    Most frequently blocked flows
+                  </p>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <TopBlockedFlowsTable flows={topBlocked?.topBlocked ?? []} />
               </CardContent>
             </Card>
           )}
