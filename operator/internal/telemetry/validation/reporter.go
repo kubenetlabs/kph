@@ -93,6 +93,13 @@ func (r *Reporter) Record(result *ValidationResult) {
 		r.allowedCount++
 	case VerdictBlocked:
 		r.blockedCount++
+		// Log blocked flows for visibility
+		r.log.Info("Blocked network flow detected",
+			"src", result.SrcNamespace+"/"+result.SrcPodName,
+			"dst", result.DstNamespace+"/"+result.DstPodName,
+			"port", result.DstPort,
+			"policy", result.MatchedPolicy,
+			"reason", result.Reason)
 		// Track top blocked
 		key := fmt.Sprintf("%s/%s/%s/%s", result.SrcNamespace, result.SrcPodName, result.DstNamespace, result.MatchedPolicy)
 		if bf, ok := r.topBlocked[key]; ok {
@@ -126,27 +133,50 @@ func (r *Reporter) Record(result *ValidationResult) {
 		}
 	}
 
+	// Build the event record
+	eventRecord := ValidationEvent{
+		Timestamp:     result.Timestamp,
+		Verdict:       string(result.Verdict),
+		SrcNamespace:  result.SrcNamespace,
+		SrcPodName:    result.SrcPodName,
+		SrcLabels:     result.SrcLabels,
+		DstNamespace:  result.DstNamespace,
+		DstPodName:    result.DstPodName,
+		DstLabels:     result.DstLabels,
+		DstPort:       int(result.DstPort),
+		Protocol:      result.Protocol,
+		MatchedPolicy: result.MatchedPolicy,
+		Reason:        result.Reason,
+	}
+
 	// Sample events - ALWAYS include BLOCKED events, sample others
 	r.eventCounter++
-	shouldSample := result.Verdict == VerdictBlocked || // Always sample blocked events
+	isBlocked := result.Verdict == VerdictBlocked
+	shouldSample := isBlocked || // Always sample blocked events
 		r.sampleRate == 1 ||
 		r.eventCounter%int64(r.sampleRate) == 0
 
-	if shouldSample && len(r.recentEvents) < r.maxEvents {
-		r.recentEvents = append(r.recentEvents, ValidationEvent{
-			Timestamp:     result.Timestamp,
-			Verdict:       string(result.Verdict),
-			SrcNamespace:  result.SrcNamespace,
-			SrcPodName:    result.SrcPodName,
-			SrcLabels:     result.SrcLabels,
-			DstNamespace:  result.DstNamespace,
-			DstPodName:    result.DstPodName,
-			DstLabels:     result.DstLabels,
-			DstPort:       int(result.DstPort),
-			Protocol:      result.Protocol,
-			MatchedPolicy: result.MatchedPolicy,
-			Reason:        result.Reason,
-		})
+	if shouldSample {
+		if len(r.recentEvents) < r.maxEvents {
+			// Buffer has space, just append
+			r.recentEvents = append(r.recentEvents, eventRecord)
+		} else if isBlocked {
+			// Buffer is full but this is a BLOCKED event - prioritize it
+			// Replace the oldest non-blocked event with this blocked event
+			replaced := false
+			for i := 0; i < len(r.recentEvents); i++ {
+				if r.recentEvents[i].Verdict != string(VerdictBlocked) {
+					r.recentEvents[i] = eventRecord
+					replaced = true
+					break
+				}
+			}
+			// If all events are already blocked, append anyway (will be truncated later)
+			if !replaced {
+				r.recentEvents = append(r.recentEvents, eventRecord)
+			}
+		}
+		// If buffer is full and this is NOT a blocked event, drop it
 	}
 }
 
