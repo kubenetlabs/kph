@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,9 +131,10 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 		return
 	}
 
-	// Only process events that are process executions or kprobes
+	// Only process events that are process executions, kprobes, or file access
 	if event.EventType != models.EventTypeProcessExec &&
-		event.EventType != models.EventTypeSyscall {
+		event.EventType != models.EventTypeSyscall &&
+		event.EventType != models.EventTypeFileAccess {
 		return
 	}
 
@@ -157,12 +159,33 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 		if len(event.MatchedPolicies) > 0 {
 			policy = event.MatchedPolicies[0]
 		}
-		key := fmt.Sprintf("%s/%s/%s", event.SrcNamespace, event.SrcBinary, policy)
+
+		// For enforcement events, namespace may be empty because Tetragon kills
+		// the process before it fully enters the container namespace.
+		// Use policy name to provide context, or "enforcement" as fallback.
+		namespace := event.SrcNamespace
+		if namespace == "" {
+			// Try to infer namespace from policy name (e.g., "block-shell-in-llm-pods" -> llm related)
+			if strings.Contains(policy, "llm") {
+				namespace = "llm-system"
+			} else {
+				namespace = "tetragon-enforcement"
+			}
+		}
+
+		// Log enforcement events for visibility
+		r.log.Info("Blocked process execution",
+			"binary", event.SrcBinary,
+			"policy", policy,
+			"namespace", namespace,
+			"node", event.NodeName)
+
+		key := fmt.Sprintf("%s/%s/%s", namespace, event.SrcBinary, policy)
 		if bp, ok := r.topBlocked[key]; ok {
 			bp.Count++
 		} else {
 			r.topBlocked[key] = &BlockedProcess{
-				Namespace: event.SrcNamespace,
+				Namespace: namespace,
 				PodName:   event.SrcPodName,
 				Binary:    event.SrcBinary,
 				Policy:    policy,
@@ -203,10 +226,21 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 	if len(event.MatchedPolicies) > 0 {
 		matchedPolicy = event.MatchedPolicies[0]
 	}
+
+	// For blocked events without namespace, infer from policy
+	eventNamespace := event.SrcNamespace
+	if verdict == "BLOCKED" && eventNamespace == "" {
+		if strings.Contains(matchedPolicy, "llm") {
+			eventNamespace = "llm-system"
+		} else {
+			eventNamespace = "tetragon-enforcement"
+		}
+	}
+
 	eventRecord := ProcessValidationEvent{
 		Timestamp:     event.Timestamp,
 		Verdict:       verdict,
-		Namespace:     event.SrcNamespace,
+		Namespace:     eventNamespace,
 		PodName:       event.SrcPodName,
 		NodeName:      event.NodeName,
 		Binary:        event.SrcBinary,

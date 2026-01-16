@@ -140,7 +140,12 @@ func (t *TetragonClient) StreamEvents(ctx context.Context) error {
 		AllowList: t.buildAllowList(),
 	}
 
-	t.log.Info("Starting event stream from Tetragon")
+	t.log.Info("Starting event stream from Tetragon",
+		"collectProcessExec", t.collectProcessExec,
+		"collectProcessExit", t.collectProcessExit,
+		"collectKprobes", t.collectKprobes,
+		"namespaceFilter", t.namespaceFilter,
+		"filterCount", len(req.AllowList))
 
 	stream, err := client.GetEvents(ctx, req)
 	if err != nil {
@@ -171,9 +176,21 @@ func (t *TetragonClient) StreamEvents(ctx context.Context) error {
 			continue
 		}
 
-		// Apply namespace filter
-		if !t.matchesNamespaceFilter(event) {
+		// Apply namespace filter, but always allow security enforcement events (SIGKILL)
+		// These events often lack namespace context because the process is killed before
+		// it fully starts in the container namespace
+		isEnforcementEvent := event.Action == "SIGKILL" || event.Verdict == models.VerdictDenied
+		if !t.matchesNamespaceFilter(event) && !isEnforcementEvent {
 			continue
+		}
+
+		// Log enforcement events that would have been filtered
+		if isEnforcementEvent && event.SrcNamespace == "" {
+			t.log.Info("Accepting enforcement event without namespace context",
+				"eventType", event.EventType,
+				"action", event.Action,
+				"binary", event.SrcBinary,
+				"matchedPolicies", event.MatchedPolicies)
 		}
 
 		// Call the event handler
@@ -298,8 +315,11 @@ func (t *TetragonClient) processExitToEvent(exit *tetragon.ProcessExit) *models.
 	// Extract process information
 	t.extractProcessInfo(event, proc)
 
-	// Add exit info
-	if exit.Signal != "" {
+	// Add exit info - check for SIGKILL which indicates Tetragon enforcement
+	if exit.Signal == "SIGKILL" {
+		event.Action = "SIGKILL"
+		event.Verdict = models.VerdictDenied
+	} else if exit.Signal != "" {
 		event.Action = fmt.Sprintf("exit:signal=%s", exit.Signal)
 	} else {
 		event.Action = fmt.Sprintf("exit:status=%d", exit.Status)
