@@ -417,39 +417,86 @@ run_all_attacks() {
 }
 
 # =============================================================================
-# Main
+# Run Single Attack by Name or Number
 # =============================================================================
-main() {
-    case "${1:-all}" in
-        egress)
+run_attack() {
+    case "$1" in
+        1|egress)
             attack_egress_exfiltration
             ;;
-        shell)
+        2|shell)
             attack_shell_execution
             ;;
-        interpreter|perl)
+        3|interpreter|perl)
             attack_interpreter_shell
             ;;
-        dns)
+        4|dns)
             attack_dns_exfiltration
             ;;
-        api)
+        5|api)
             attack_api_exposure
             ;;
-        cross)
+        6|cross)
             attack_cross_namespace
             ;;
-        privesc)
+        7|privesc)
             attack_privilege_escalation
             ;;
         all)
             run_all_attacks
             ;;
         *)
-            echo "Usage: $0 [egress|shell|interpreter|dns|api|cross|privesc|all]"
-            exit 1
+            echo "Unknown attack: $1"
+            return 1
             ;;
     esac
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+show_usage() {
+    echo "Usage: $0 [attack ...] "
+    echo ""
+    echo "Run specific attacks by number or name:"
+    echo "  $0 1 4          # Run attacks 1 and 4"
+    echo "  $0 2 3          # Run attacks 2 and 3"
+    echo "  $0 5 6 7        # Run attacks 5, 6, and 7"
+    echo "  $0 egress dns   # Run by name"
+    echo "  $0 all          # Run all attacks"
+    echo ""
+    echo "Available attacks:"
+    echo "  1, egress      - Lateral Movement to Infrastructure Services"
+    echo "  2, shell       - Shell Execution (RCE)"
+    echo "  3, interpreter - Interpreter-Based Reverse Shell"
+    echo "  4, dns         - DNS Exfiltration"
+    echo "  5, api         - Unauthorized Ollama API Access"
+    echo "  6, cross       - Cross-Namespace Communication"
+    echo "  7, privesc     - Privilege Escalation"
+    echo "  all            - Run all attacks"
+}
+
+main() {
+    if [ $# -eq 0 ]; then
+        show_usage
+        exit 0
+    fi
+
+    # Check for help flag
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        show_usage
+        exit 0
+    fi
+
+    # Run each specified attack
+    for attack in "$@"; do
+        run_attack "$attack"
+    done
+
+    echo ""
+    echo "============================================================="
+    echo "  Attack Simulation Complete"
+    echo "============================================================="
 }
 
 main "$@"
