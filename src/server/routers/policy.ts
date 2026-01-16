@@ -8,6 +8,7 @@ import {
   KIND_TO_POLICY_TYPE,
   GATEWAY_API_KINDS,
 } from "~/lib/gateway-api-validator";
+import { validatePolicy, type PolicyType as ValidatorPolicyType } from "~/lib/policy-validator";
 
 // Use orgProtectedProcedure for all policy operations (requires organization)
 const protectedProcedure = orgProtectedProcedure;
@@ -232,7 +233,17 @@ export const policyRouter = createTRPCRouter({
         });
       }
 
-      // Validate Gateway API YAML if applicable
+      // Validate policy content (YAML syntax + schema validation)
+      const validation = validatePolicy(input.content, input.type as ValidatorPolicyType);
+      if (!validation.valid) {
+        const errorMessages = validation.errors.map((e) => e.message).join("; ");
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Invalid policy YAML: ${errorMessages}`,
+        });
+      }
+
+      // Additional Gateway API validation (more detailed schema checks)
       if (isGatewayAPIType(input.type)) {
         // This will throw a TRPCError with BAD_REQUEST if validation fails
         validateGatewayAPIPolicy(input.content, input.type);
@@ -321,7 +332,17 @@ export const policyRouter = createTRPCRouter({
         // Determine the policy type (use updated type if provided, otherwise existing)
         const policyType = data.type ?? existing.type;
 
-        // Validate Gateway API YAML if applicable
+        // Validate policy content (YAML syntax + schema validation)
+        const validation = validatePolicy(data.content, policyType as ValidatorPolicyType);
+        if (!validation.valid) {
+          const errorMessages = validation.errors.map((e) => e.message).join("; ");
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Invalid policy YAML: ${errorMessages}`,
+          });
+        }
+
+        // Additional Gateway API validation (more detailed schema checks)
         if (isGatewayAPIType(policyType)) {
           // This will throw a TRPCError with BAD_REQUEST if validation fails
           validateGatewayAPIPolicy(data.content, policyType);

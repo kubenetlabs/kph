@@ -11,6 +11,7 @@ import Textarea from "~/components/ui/textarea";
 import Input from "~/components/ui/input";
 import Modal from "~/components/ui/modal";
 import { trpc } from "~/lib/trpc";
+import { validatePolicy, type ValidationResult } from "~/lib/policy-validator";
 
 type PolicyType =
   | "CILIUM_NETWORK"
@@ -76,8 +77,19 @@ function GeneratePolicyPageContent() {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [selectedClusterId, setSelectedClusterId] = useState("");
   const [prefilled, setPrefilled] = useState(false);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
   const utils = trpc.useUtils();
+
+  // Validate generated policy whenever it changes
+  useEffect(() => {
+    if (generatedPolicy) {
+      const result = validatePolicy(generatedPolicy.content, generatedPolicy.type);
+      setValidationResult(result);
+    } else {
+      setValidationResult(null);
+    }
+  }, [generatedPolicy]);
 
   // Read pre-filled values from URL params (from telemetry panel)
   useEffect(() => {
@@ -370,7 +382,12 @@ function GeneratePolicyPageContent() {
                       </svg>
                       Copy
                     </Button>
-                    <Button size="sm" onClick={() => setIsSaveModalOpen(true)}>
+                    <Button
+                      size="sm"
+                      onClick={() => setIsSaveModalOpen(true)}
+                      disabled={!validationResult?.valid}
+                      title={!validationResult?.valid ? "Fix validation errors before saving" : undefined}
+                    >
                       <svg
                         className="mr-1 h-4 w-4"
                         fill="none"
@@ -456,6 +473,46 @@ function GeneratePolicyPageContent() {
                       </code>
                     </pre>
                   </div>
+
+                  {/* Validation Result */}
+                  {validationResult && !validationResult.valid && (
+                    <div className="rounded-md border border-danger/30 bg-danger/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <svg className="h-5 w-5 text-danger flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div>
+                          <h4 className="font-semibold text-danger text-sm">Validation Errors</h4>
+                          <ul className="mt-2 space-y-1 text-sm text-danger">
+                            {validationResult.errors.map((err, i) => (
+                              <li key={i} className="flex gap-2">
+                                <span className="text-danger/60">-</span>
+                                <span>
+                                  {err.line && <span className="font-mono text-xs bg-danger/20 px-1 rounded mr-2">Line {err.line}</span>}
+                                  {err.field && <span className="font-mono text-xs bg-danger/20 px-1 rounded mr-2">{err.field}</span>}
+                                  {err.message}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 text-xs text-muted">
+                            Fix the errors above before saving. The AI may have generated invalid YAML.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {validationResult?.valid && (
+                    <div className="rounded-md border border-success/30 bg-success/10 p-3">
+                      <div className="flex items-center gap-2">
+                        <svg className="h-5 w-5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-sm text-success font-medium">YAML is valid and ready to save</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Generation Info */}
                   <div className="flex items-center justify-between border-t border-card-border pt-3 text-xs text-muted">
