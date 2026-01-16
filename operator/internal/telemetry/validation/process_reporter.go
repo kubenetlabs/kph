@@ -217,14 +217,16 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 		Action:        event.Action,
 	}
 
-	// Always record blocked events (security-critical), sample others
-	if verdict == "BLOCKED" {
-		// Always record blocked events
+	// Always record security-relevant events, sample normal events
+	shouldAlwaysRecord := verdict == "BLOCKED" || isSuspiciousBinary(event.SrcBinary)
+
+	if shouldAlwaysRecord {
+		// Always record blocked events and suspicious binaries
 		if len(r.recentEvents) < r.maxEvents {
 			r.recentEvents = append(r.recentEvents, eventRecord)
 		}
 	} else {
-		// Sample non-blocked events
+		// Sample normal events
 		r.eventCounter++
 		if r.sampleRate == 1 || r.eventCounter%int64(r.sampleRate) == 0 {
 			if len(r.recentEvents) < r.maxEvents {
@@ -232,6 +234,40 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 			}
 		}
 	}
+}
+
+// isSuspiciousBinary returns true if the binary is security-relevant and should always be recorded
+func isSuspiciousBinary(binary string) bool {
+	// Extract basename from path
+	basename := binary
+	if idx := len(binary) - 1; idx >= 0 {
+		for i := len(binary) - 1; i >= 0; i-- {
+			if binary[i] == '/' {
+				basename = binary[i+1:]
+				break
+			}
+		}
+	}
+
+	// Suspicious binaries that should always be recorded
+	suspiciousBinaries := map[string]bool{
+		// Shells
+		"sh": true, "bash": true, "zsh": true, "dash": true, "ash": true,
+		// Network tools
+		"curl": true, "wget": true, "nc": true, "netcat": true, "ncat": true,
+		// Scripting languages
+		"python": true, "python3": true, "perl": true, "ruby": true,
+		// Permission changes
+		"chmod": true, "chown": true,
+		// Encoding tools
+		"base64": true, "xxd": true,
+		// Scanning tools
+		"nmap": true, "masscan": true,
+		// File readers (often used to access sensitive files)
+		"cat": true, "head": true, "tail": true, "less": true, "more": true,
+	}
+
+	return suspiciousBinaries[basename]
 }
 
 // Flush sends accumulated data to SaaS and resets counters

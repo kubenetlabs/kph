@@ -294,7 +294,54 @@ func (m *PolicyMatcher) flowMatchesEgressRule(event *models.TelemetryEvent, rule
 		}
 	}
 
+	// Check toFQDNs (DNS query patterns)
+	if len(rule.ToFQDNs) > 0 {
+		// This rule only applies to DNS traffic
+		if event.DstPort != 53 && event.DNSQuery == "" {
+			return false
+		}
+		// If there's a DNS query, check if it matches any allowed pattern
+		if event.DNSQuery != "" {
+			fqdnMatched := false
+			for _, pattern := range rule.ToFQDNs {
+				if m.fqdnMatches(event.DNSQuery, pattern) {
+					fqdnMatched = true
+					break
+				}
+			}
+			if !fqdnMatched {
+				return false
+			}
+		}
+	}
+
 	return true
+}
+
+// fqdnMatches checks if a DNS query matches an FQDN pattern (supports wildcards)
+func (m *PolicyMatcher) fqdnMatches(query, pattern string) bool {
+	// Normalize: remove trailing dots
+	query = strings.TrimSuffix(strings.ToLower(query), ".")
+	pattern = strings.TrimSuffix(strings.ToLower(pattern), ".")
+
+	// Exact match
+	if query == pattern {
+		return true
+	}
+
+	// Wildcard matching: *.example.com matches foo.example.com, bar.example.com
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := pattern[1:] // ".example.com"
+		return strings.HasSuffix(query, suffix)
+	}
+
+	// Wildcard matching: *example.com matches fooexample.com (less common but valid)
+	if strings.HasPrefix(pattern, "*") {
+		suffix := pattern[1:]
+		return strings.HasSuffix(query, suffix)
+	}
+
+	return false
 }
 
 // portMatches checks if a flow matches a port rule

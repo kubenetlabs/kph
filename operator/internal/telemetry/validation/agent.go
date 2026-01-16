@@ -173,6 +173,17 @@ func (a *Agent) processEvents(ctx context.Context) {
 // validateEvent validates a single event
 func (a *Agent) validateEvent(event *models.TelemetryEvent) {
 	result := a.matcher.Match(event)
+
+	// If Hubble reported this flow as DROPPED, it was actually blocked by Cilium
+	// Use Hubble's verdict as source of truth when our matcher can't determine blocking
+	// (e.g., for L7 rules like toFQDNs where we may not have L7 visibility)
+	if event.Verdict == models.VerdictDropped && result.Verdict != VerdictBlocked {
+		result.Verdict = VerdictBlocked
+		if result.Reason == "" || result.Reason == "No policy governs this flow" {
+			result.Reason = "Dropped by Cilium policy (Hubble verdict)"
+		}
+	}
+
 	a.reporter.Record(result)
 
 	// Update stats

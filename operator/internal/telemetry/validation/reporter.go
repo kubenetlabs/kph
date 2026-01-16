@@ -126,25 +126,27 @@ func (r *Reporter) Record(result *ValidationResult) {
 		}
 	}
 
-	// Sample events
+	// Sample events - ALWAYS include BLOCKED events, sample others
 	r.eventCounter++
-	if r.sampleRate == 1 || r.eventCounter%int64(r.sampleRate) == 0 {
-		if len(r.recentEvents) < r.maxEvents {
-			r.recentEvents = append(r.recentEvents, ValidationEvent{
-				Timestamp:     result.Timestamp,
-				Verdict:       string(result.Verdict),
-				SrcNamespace:  result.SrcNamespace,
-				SrcPodName:    result.SrcPodName,
-				SrcLabels:     result.SrcLabels,
-				DstNamespace:  result.DstNamespace,
-				DstPodName:    result.DstPodName,
-				DstLabels:     result.DstLabels,
-				DstPort:       int(result.DstPort),
-				Protocol:      result.Protocol,
-				MatchedPolicy: result.MatchedPolicy,
-				Reason:        result.Reason,
-			})
-		}
+	shouldSample := result.Verdict == VerdictBlocked || // Always sample blocked events
+		r.sampleRate == 1 ||
+		r.eventCounter%int64(r.sampleRate) == 0
+
+	if shouldSample && len(r.recentEvents) < r.maxEvents {
+		r.recentEvents = append(r.recentEvents, ValidationEvent{
+			Timestamp:     result.Timestamp,
+			Verdict:       string(result.Verdict),
+			SrcNamespace:  result.SrcNamespace,
+			SrcPodName:    result.SrcPodName,
+			SrcLabels:     result.SrcLabels,
+			DstNamespace:  result.DstNamespace,
+			DstPodName:    result.DstPodName,
+			DstLabels:     result.DstLabels,
+			DstPort:       int(result.DstPort),
+			Protocol:      result.Protocol,
+			MatchedPolicy: result.MatchedPolicy,
+			Reason:        result.Reason,
+		})
 	}
 }
 
