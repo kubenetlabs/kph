@@ -17,6 +17,7 @@ const categoryConfig = {
   network_tool: { label: "Network Tool", variant: "warning" as const, icon: "globe" },
   scripting: { label: "Scripting", variant: "tetragon" as const, icon: "code" },
   system: { label: "System", variant: "muted" as const, icon: "cog" },
+  file_reader: { label: "File Reader", variant: "warning" as const, icon: "file" },
   normal: { label: "Normal", variant: "muted" as const, icon: "check" },
 };
 
@@ -114,6 +115,33 @@ spec:
         - /python
         - /python3
         - /ruby
+      matchActions:
+      - action: Sigkill
+
+Do NOT use matchBinaries or matchNamespaces.`;
+        break;
+      case "file_reader":
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks reading sensitive files.
+
+The structure must use kprobes to monitor file read syscalls and block access to sensitive paths like /etc/shadow, /etc/passwd, and /var/run/secrets.
+
+spec:
+  kprobes:
+  - call: sys_openat
+    syscall: true
+    args:
+    - index: 1
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: Prefix
+        values:
+        - /etc/shadow
+        - /etc/passwd
+        - /etc/sudoers
+        - /var/run/secrets
+        - /root/.ssh
       matchActions:
       - action: Sigkill
 
@@ -259,7 +287,7 @@ Do NOT use matchBinaries or matchNamespaces.`;
         {!isLoading && data && (
           <>
             {/* Summary Stats */}
-            <div className="grid grid-cols-5 gap-4 mb-4">
+            <div className="grid grid-cols-6 gap-4 mb-4">
               <div className="bg-card-hover rounded-lg p-3 text-center">
                 <p className="text-2xl font-bold text-foreground">{data.summary.totalEvents}</p>
                 <p className="text-xs text-muted">Total Events</p>
@@ -275,6 +303,10 @@ Do NOT use matchBinaries or matchNamespaces.`;
               <div className="bg-tetragon/10 border border-tetragon/30 rounded-lg p-3 text-center">
                 <p className="text-2xl font-bold text-tetragon">{data.summary.scriptingLanguages}</p>
                 <p className="text-xs text-tetragon">Scripting</p>
+              </div>
+              <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-warning">{data.summary.fileReaders ?? 0}</p>
+                <p className="text-xs text-warning">File Readers</p>
               </div>
               <div className="bg-card-hover rounded-lg p-3 text-center">
                 <p className="text-2xl font-bold text-foreground">{data.summary.uniquePods}</p>
