@@ -39,35 +39,107 @@ export function ProcessEventsPanel({ clusterId, timeRange }: ProcessEventsPanelP
 
   const handleGeneratePolicy = (namespace: string, processName: string, category: string) => {
     // Build a natural language prompt based on the event type
-    // IMPORTANT: Prompts must specify correct Tetragon structure to avoid invalid YAML
+    // IMPORTANT: Use matchArgs with Postfix operator - this is the proven working approach
     let prompt = "";
 
     switch (category) {
       case "shell":
-        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks shell execution. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /bin/sh, /bin/bash, /bin/zsh, /bin/dash, /bin/ash, /usr/bin/sh, /usr/bin/bash, /usr/bin/zsh. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks shell execution.
+
+The structure must be EXACTLY like this:
+spec:
+  kprobes:
+  - call: sys_execve
+    syscall: true
+    args:
+    - index: 0
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: Postfix
+        values:
+        - /sh
+        - /bash
+        - /zsh
+        - /dash
+        - /ash
+      matchActions:
+      - action: Sigkill
+
+Do NOT use matchBinaries or matchNamespaces.`;
         break;
       case "network_tool":
-        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks network tools. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" and values array containing: /usr/bin/curl, /usr/bin/wget, /usr/bin/nc, /usr/bin/netcat, /bin/nc. Use matchActions with action: Sigkill. Do NOT use matchNamespaces - the namespace is already set in metadata.namespace.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks network tools.
+
+The structure must be EXACTLY like this:
+spec:
+  kprobes:
+  - call: sys_execve
+    syscall: true
+    args:
+    - index: 0
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: Postfix
+        values:
+        - /curl
+        - /wget
+        - /nc
+        - /netcat
+      matchActions:
+      - action: Sigkill
+
+Do NOT use matchBinaries or matchNamespaces.`;
         break;
       case "scripting":
         prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks scripting interpreters.
 
-The selector structure must be EXACTLY like this (matchBinaries is an ARRAY):
-selectors:
-- matchBinaries:
-  - operator: In
-    values:
-    - /usr/bin/python
-    - /usr/bin/python3
-    - /usr/bin/perl
-    - /usr/bin/ruby
-  matchActions:
-  - action: Sigkill
+The structure must be EXACTLY like this:
+spec:
+  kprobes:
+  - call: sys_execve
+    syscall: true
+    args:
+    - index: 0
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: Postfix
+        values:
+        - /perl
+        - /python
+        - /python3
+        - /ruby
+      matchActions:
+      - action: Sigkill
 
-Use kprobe call: sys_execve with syscall: true. Do NOT use matchNamespaces.`;
+Do NOT use matchBinaries or matchNamespaces.`;
         break;
       default:
-        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that monitors when ${processName} executes. Use a kprobe on sys_execve with syscall: true. Use matchBinaries with operator "In" to match the binary path. Do NOT use matchNamespaces.`;
+        prompt = `Create a Tetragon TracingPolicyNamespaced for the ${namespace} namespace that blocks ${processName}.
+
+Use this structure:
+spec:
+  kprobes:
+  - call: sys_execve
+    syscall: true
+    args:
+    - index: 0
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: Postfix
+        values:
+        - /${processName.split('/').pop()}
+      matchActions:
+      - action: Sigkill
+
+Do NOT use matchBinaries or matchNamespaces.`;
     }
 
     // Navigate to policy generation page with pre-filled prompt
@@ -86,16 +158,38 @@ Use kprobe call: sys_execve with syscall: true. Do NOT use matchNamespaces.`;
     const namespaces = [...new Set(data.podGroups.map((pg) => pg.namespace))];
     const ns = namespaces[0] ?? "default";
 
-    const prompt = `Create a Tetragon TracingPolicyNamespaced for the ${ns} namespace that provides comprehensive runtime security for LLM workloads.
+    const prompt = `Create a Tetragon TracingPolicyNamespaced for the ${ns} namespace that provides comprehensive runtime security.
 
-Use a kprobe on sys_execve with syscall: true. The selector should use matchBinaries with operator "In" and a values array containing ALL of these binaries:
-- Shells: /bin/sh, /bin/bash, /bin/zsh, /bin/dash, /bin/ash, /usr/bin/bash
-- Network tools: /usr/bin/curl, /usr/bin/wget, /usr/bin/nc
-- Scripting interpreters: /usr/bin/python, /usr/bin/python3, /usr/bin/perl, /usr/bin/ruby
+The structure must be EXACTLY like this:
+spec:
+  kprobes:
+  - call: sys_execve
+    syscall: true
+    args:
+    - index: 0
+      type: string
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: Postfix
+        values:
+        - /sh
+        - /bash
+        - /zsh
+        - /dash
+        - /ash
+        - /curl
+        - /wget
+        - /nc
+        - /netcat
+        - /perl
+        - /python
+        - /python3
+        - /ruby
+      matchActions:
+      - action: Sigkill
 
-Use matchActions with action: Sigkill to terminate matching processes immediately.
-
-IMPORTANT: Do NOT use matchNamespaces - the namespace is already set in metadata.namespace for TracingPolicyNamespaced.`;
+Do NOT use matchBinaries or matchNamespaces.`;
 
     const params = new URLSearchParams({
       prompt: encodeURIComponent(prompt),
