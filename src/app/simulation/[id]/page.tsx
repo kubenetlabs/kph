@@ -94,6 +94,12 @@ interface TetragonSimulationResults {
   breakdownByNamespace: Record<string, TetragonNSImpact>;
   sampleBlockedProcesses: ProcessSimulationResult[];
   sampleAllowedProcesses: ProcessSimulationResult[];
+  error?: string; // Error message if simulation failed
+}
+
+interface FailedSimulationResults {
+  type?: "TETRAGON";
+  error: string;
 }
 
 interface NetworkSimulationResults {
@@ -106,15 +112,19 @@ interface NetworkSimulationResults {
   durationNs?: number;
 }
 
-type SimulationResults = TetragonSimulationResults | NetworkSimulationResults;
+type SimulationResults = TetragonSimulationResults | NetworkSimulationResults | FailedSimulationResults;
 
 // Type guards for simulation results
+function isFailedResults(results: SimulationResults | null): results is FailedSimulationResults {
+  return results !== null && "error" in results && typeof results.error === "string" && !("policyName" in results);
+}
+
 function isTetragonResults(results: SimulationResults | null): results is TetragonSimulationResults {
-  return results !== null && "type" in results && results.type === "TETRAGON";
+  return results !== null && "type" in results && results.type === "TETRAGON" && "policyName" in results;
 }
 
 function isNetworkResults(results: SimulationResults | null): results is NetworkSimulationResults {
-  return results !== null && !("type" in results && results.type === "TETRAGON");
+  return results !== null && !("type" in results && results.type === "TETRAGON") && !isFailedResults(results);
 }
 
 // Verdict Breakdown Component
@@ -627,9 +637,11 @@ export default function SimulationDetailPage() {
   // Parse results if available
   const results = simulation.results as SimulationResults | null;
   const hasResults = isCompleted && results;
+  const isFailed = simulation.status === "FAILED";
+  const failedResults = isFailedResults(results) ? results : null;
   const tetragonResults = isTetragonResults(results) ? results : null;
   const networkResults = isNetworkResults(results) ? results : null;
-  const isTetragonSimulation = tetragonResults !== null;
+  const isTetragonSimulation = tetragonResults !== null || (isFailed && results && "type" in results && results.type === "TETRAGON");
 
   return (
     <AppShell>
@@ -740,6 +752,36 @@ export default function SimulationDetailPage() {
                     ? "This simulation is queued and waiting for the cluster operator to process it."
                     : "The cluster operator is analyzing historical network flows against your policy."}
                 </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Failed Status */}
+      {isFailed && (
+        <Card className="mb-6 border-danger/30 bg-danger/5">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-4">
+              <svg className="h-10 w-10 text-danger flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <h3 className="font-semibold text-danger">Simulation Failed</h3>
+                {failedResults?.error ? (
+                  <p className="text-sm text-danger mt-1">{failedResults.error}</p>
+                ) : networkResults?.errors?.length ? (
+                  <ul className="text-sm text-danger mt-1 space-y-1">
+                    {networkResults.errors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted mt-1">
+                    The simulation failed to complete. This may be due to the operator being unable to process the policy
+                    or a timeout waiting for results. Check operator logs for details.
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
