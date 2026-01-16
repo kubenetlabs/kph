@@ -316,7 +316,7 @@ function validateArrayFields(
 
       // Check each item in the parent array
       for (let i = 0; i < parentValue.length; i++) {
-        const item = parentValue[i];
+        const item: unknown = parentValue[i];
         if (!isPlainObject(item)) continue;
 
         const childValue = item[childField];
