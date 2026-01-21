@@ -1,5 +1,10 @@
-# Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/henleda/policy-hub-operator:latest
+# Image URLs for building/pushing image targets
+# The main image contains both operator manager AND collector binaries
+# This allows using a single image for both deployments with different entrypoints
+OPERATOR_IMG ?= ghcr.io/henleda/policy-hub-operator:latest
+COLLECTOR_IMG ?= ghcr.io/henleda/policy-hub-collector:latest
+# Legacy alias for backwards compatibility
+IMG ?= $(OPERATOR_IMG)
 
 # Get the currently used golang install path
 GOBIN ?= $(shell go env GOBIN)
@@ -57,8 +62,19 @@ docker-push: ## Push docker image
 	docker push ${IMG}
 
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for cross-platform support
-	docker buildx build --platform linux/amd64,linux/arm64 -t ${IMG} --push .
+docker-buildx: ## Build and push combined image (operator+collector) for cross-platform support
+	docker buildx build --platform linux/amd64,linux/arm64 -t ${OPERATOR_IMG} --push .
+
+.PHONY: docker-buildx-collector
+docker-buildx-collector: ## Build and push collector-only image for cross-platform support
+	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.collector -t ${COLLECTOR_IMG} --push .
+
+.PHONY: docker-buildx-all
+docker-buildx-all: docker-buildx docker-buildx-collector ## Build and push all images for cross-platform support
+
+.PHONY: docker-build-collector
+docker-build-collector: ## Build collector-only docker image (native platform)
+	docker build -f Dockerfile.collector -t ${COLLECTOR_IMG} .
 
 ##@ Deployment
 

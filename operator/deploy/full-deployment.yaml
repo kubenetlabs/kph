@@ -372,8 +372,9 @@ spec:
               echo "Bootstrap secret found, collector can start"
       containers:
         - name: collector
-          image: ghcr.io/henleda/policy-hub-operator:latest
-          command: ["/collector"]
+          # Use the dedicated collector image (built from Dockerfile.collector)
+          # Alternatively, can use ghcr.io/henleda/policy-hub-operator:latest with command: ["/collector"]
+          image: ghcr.io/henleda/policy-hub-collector:latest
           imagePullPolicy: Always
           env:
             - name: NODE_NAME
