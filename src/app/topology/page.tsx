@@ -22,7 +22,9 @@ export default function TopologyPage() {
   }
 
   // Fetch topology data
-  const { data: topologyData, isLoading } = trpc.topology.getGraph.useQuery(
+  // Uses placeholderData to keep showing previous data during refresh (no jank)
+  // staleTime prevents unnecessary refetches when filters change quickly
+  const { data: topologyData, isLoading, isFetching } = trpc.topology.getGraph.useQuery(
     {
       clusterId: selectedClusterId,
       mode: mode === "simulation" ? "simulation" : "live",
@@ -35,6 +37,8 @@ export default function TopologyPage() {
     {
       enabled: !!selectedClusterId,
       refetchInterval: mode === "live" ? 30000 : undefined,
+      placeholderData: (prev) => prev, // Keep previous data visible during refresh
+      staleTime: 10000, // Consider data fresh for 10s
     }
   );
 
@@ -192,9 +196,17 @@ export default function TopologyPage() {
 
         {/* Map area */}
         <div className="h-[500px] relative rounded-lg border border-border overflow-hidden">
-          {isLoading && (
+          {/* Only show blocking spinner on initial load, not during refresh */}
+          {isLoading && !topologyData && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-20">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          )}
+          {/* Subtle indicator during background refresh */}
+          {isFetching && topologyData && (
+            <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded bg-background/90 px-2 py-1 text-xs text-muted border border-border">
+              <div className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
+              Updating...
             </div>
           )}
 
