@@ -49,8 +49,8 @@ export async function PATCH(
     return unauthorized();
   }
 
-  // Check required scope
-  const scopeError = requireScope(auth, "policy:read");
+  // Check required scope - status updates are mutations, require write scope
+  const scopeError = requireScope(auth, "policy:write");
   if (scopeError) return scopeError;
 
   try {
@@ -116,12 +116,18 @@ export async function PATCH(
     }
 
     // Update policy status for DEPLOYED or FAILED
+    // Note: deployedVersion is managed by the system, not by operator input
+    // It increments only on successful deployment to track version history
     const updatedPolicy = await db.policy.update({
       where: { id: policyId },
       data: {
         status: status,
         deployedAt: status === "DEPLOYED" ? new Date() : undefined,
-        deployedVersion: version ?? (policy.deployedVersion ?? 0) + 1,
+        // Only increment version on successful deployment, keep current on failure
+        deployedVersion:
+          status === "DEPLOYED"
+            ? (policy.deployedVersion ?? 0) + 1
+            : policy.deployedVersion,
       },
     });
 

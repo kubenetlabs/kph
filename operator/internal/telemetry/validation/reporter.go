@@ -171,9 +171,12 @@ func (r *Reporter) Record(result *ValidationResult) {
 					break
 				}
 			}
-			// If all events are already blocked, append anyway (will be truncated later)
+			// If all events are already BLOCKED, drop this event to prevent unbounded growth
+			// The buffer already captures the blocked traffic pattern
 			if !replaced {
-				r.recentEvents = append(r.recentEvents, eventRecord)
+				r.log.V(1).Info("Dropping blocked event - buffer full with blocked events",
+					"bufferSize", len(r.recentEvents),
+					"maxEvents", r.maxEvents)
 			}
 		}
 		// If buffer is full and this is NOT a blocked event, drop it

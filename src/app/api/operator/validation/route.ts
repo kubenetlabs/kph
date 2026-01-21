@@ -60,6 +60,76 @@ const ValidationIngestionSchema = z.object({
   events: z.array(ValidationEventSchema).max(1000).optional(),
 });
 
+// Types for merge operations
+type CoverageGapType = z.infer<typeof CoverageGapSchema>;
+type BlockedFlowType = z.infer<typeof BlockedFlowSchema>;
+
+/**
+ * Merge coverage gaps by combining entries with matching keys and summing counts.
+ * Keeps top 20 by count.
+ */
+function mergeCoverageGaps(
+  existing: CoverageGapType[],
+  incoming: CoverageGapType[]
+): CoverageGapType[] {
+  const map = new Map<string, CoverageGapType>();
+
+  // Add existing gaps
+  for (const gap of existing) {
+    const key = `${gap.srcNamespace}/${gap.srcPodName ?? ""}/${gap.dstNamespace}/${gap.dstPodName ?? ""}/${gap.dstPort}`;
+    map.set(key, { ...gap });
+  }
+
+  // Merge incoming gaps
+  for (const gap of incoming) {
+    const key = `${gap.srcNamespace}/${gap.srcPodName ?? ""}/${gap.dstNamespace}/${gap.dstPodName ?? ""}/${gap.dstPort}`;
+    const existingGap = map.get(key);
+    if (existingGap) {
+      existingGap.count += gap.count;
+    } else {
+      map.set(key, { ...gap });
+    }
+  }
+
+  // Sort by count descending and take top 20
+  return Array.from(map.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+}
+
+/**
+ * Merge blocked flows by combining entries with matching keys and summing counts.
+ * Keeps top 20 by count.
+ */
+function mergeTopBlocked(
+  existing: BlockedFlowType[],
+  incoming: BlockedFlowType[]
+): BlockedFlowType[] {
+  const map = new Map<string, BlockedFlowType>();
+
+  // Add existing blocked flows
+  for (const flow of existing) {
+    const key = `${flow.srcNamespace}/${flow.srcPodName ?? ""}/${flow.dstNamespace}/${flow.policy}`;
+    map.set(key, { ...flow });
+  }
+
+  // Merge incoming blocked flows
+  for (const flow of incoming) {
+    const key = `${flow.srcNamespace}/${flow.srcPodName ?? ""}/${flow.dstNamespace}/${flow.policy}`;
+    const existingFlow = map.get(key);
+    if (existingFlow) {
+      existingFlow.count += flow.count;
+    } else {
+      map.set(key, { ...flow });
+    }
+  }
+
+  // Sort by count descending and take top 20
+  return Array.from(map.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+}
+
 /**
  * POST /api/operator/validation
  * Receives validation summaries and events from cluster collectors
@@ -112,7 +182,7 @@ export async function POST(request: NextRequest) {
       })),
     });
 
-    // Upsert validation summaries
+    // Upsert validation summaries with proper JSON merging
     if (summaries && summaries.length > 0) {
       for (const summary of summaries) {
         console.log("[Validation API] Upserting summary:", {
@@ -120,30 +190,58 @@ export async function POST(request: NextRequest) {
           hour: summary.hour,
           blocked: summary.blockedCount,
         });
-        await db.validationSummary.upsert({
+
+        // First check if record exists to properly merge JSON arrays
+        const existing = await db.validationSummary.findUnique({
           where: {
             clusterId_hour: {
               clusterId: auth.clusterId,
               hour: new Date(summary.hour),
             },
           },
-          update: {
-            allowedCount: { increment: summary.allowedCount },
-            blockedCount: { increment: summary.blockedCount },
-            noPolicyCount: { increment: summary.noPolicyCount },
-            coverageGaps: summary.coverageGaps ?? undefined,
-            topBlocked: summary.topBlocked ?? undefined,
-          },
-          create: {
-            clusterId: auth.clusterId,
-            hour: new Date(summary.hour),
-            allowedCount: summary.allowedCount,
-            blockedCount: summary.blockedCount,
-            noPolicyCount: summary.noPolicyCount,
-            coverageGaps: summary.coverageGaps ?? undefined,
-            topBlocked: summary.topBlocked ?? undefined,
-          },
         });
+
+        if (existing) {
+          // Merge coverage gaps and top blocked instead of overwriting
+          const existingGaps = (existing.coverageGaps as CoverageGapType[] | null) ?? [];
+          const existingBlocked = (existing.topBlocked as BlockedFlowType[] | null) ?? [];
+
+          const mergedGaps = summary.coverageGaps
+            ? mergeCoverageGaps(existingGaps, summary.coverageGaps)
+            : existingGaps;
+          const mergedBlocked = summary.topBlocked
+            ? mergeTopBlocked(existingBlocked, summary.topBlocked)
+            : existingBlocked;
+
+          await db.validationSummary.update({
+            where: {
+              clusterId_hour: {
+                clusterId: auth.clusterId,
+                hour: new Date(summary.hour),
+              },
+            },
+            data: {
+              allowedCount: { increment: summary.allowedCount },
+              blockedCount: { increment: summary.blockedCount },
+              noPolicyCount: { increment: summary.noPolicyCount },
+              coverageGaps: mergedGaps.length > 0 ? mergedGaps : undefined,
+              topBlocked: mergedBlocked.length > 0 ? mergedBlocked : undefined,
+            },
+          });
+        } else {
+          // Create new record
+          await db.validationSummary.create({
+            data: {
+              clusterId: auth.clusterId,
+              hour: new Date(summary.hour),
+              allowedCount: summary.allowedCount,
+              blockedCount: summary.blockedCount,
+              noPolicyCount: summary.noPolicyCount,
+              coverageGaps: summary.coverageGaps ?? undefined,
+              topBlocked: summary.topBlocked ?? undefined,
+            },
+          });
+        }
         summariesUpserted++;
       }
     }
