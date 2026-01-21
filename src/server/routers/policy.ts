@@ -5,6 +5,7 @@ import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
 import {
   isGatewayAPIType,
   validateGatewayAPIPolicy,
+  validatePolicyTypeMatchesYaml,
   KIND_TO_POLICY_TYPE,
   GATEWAY_API_KINDS,
 } from "~/lib/gateway-api-validator";
@@ -243,45 +244,53 @@ export const policyRouter = createTRPCRouter({
         });
       }
 
+      // Bidirectional validation: ensure YAML kind matches declared policy type
+      validatePolicyTypeMatchesYaml(input.content, input.type);
+
       // Additional Gateway API validation (more detailed schema checks)
       if (isGatewayAPIType(input.type)) {
         // This will throw a TRPCError with BAD_REQUEST if validation fails
         validateGatewayAPIPolicy(input.content, input.type);
       }
 
-      const policy = await ctx.db.policy.create({
-        data: {
-          name: input.name,
-          description: input.description,
-          type: input.type,
-          content: input.content,
-          targetNamespaces: input.targetNamespaces,
-          targetLabels: input.targetLabels,
-          generatedFrom: input.generatedFrom,
-          generatedModel: input.generatedModel,
-          status: "DRAFT",
-          organizationId: ctx.organizationId,
-          clusterId: input.clusterId,
-          createdById: ctx.userId,
-        },
-        include: {
-          cluster: {
-            select: {
-              id: true,
-              name: true,
+      // Create policy and initial version in a transaction
+      const policy = await ctx.db.$transaction(async (tx) => {
+        const newPolicy = await tx.policy.create({
+          data: {
+            name: input.name,
+            description: input.description,
+            type: input.type,
+            content: input.content,
+            targetNamespaces: input.targetNamespaces,
+            targetLabels: input.targetLabels,
+            generatedFrom: input.generatedFrom,
+            generatedModel: input.generatedModel,
+            status: "DRAFT",
+            organizationId: ctx.organizationId,
+            clusterId: input.clusterId,
+            createdById: ctx.userId,
+          },
+          include: {
+            cluster: {
+              select: {
+                id: true,
+                name: true,
+              },
             },
           },
-        },
-      });
+        });
 
-      // Create initial version
-      await ctx.db.policyVersion.create({
-        data: {
-          policyId: policy.id,
-          version: 1,
-          content: input.content,
-          changelog: "Initial version",
-        },
+        // Create initial version
+        await tx.policyVersion.create({
+          data: {
+            policyId: newPolicy.id,
+            version: 1,
+            content: input.content,
+            changelog: "Initial version",
+          },
+        });
+
+        return newPolicy;
       });
 
       return policy;
@@ -341,6 +350,9 @@ export const policyRouter = createTRPCRouter({
             message: `Invalid policy YAML: ${errorMessages}`,
           });
         }
+
+        // Bidirectional validation: ensure YAML kind matches declared policy type
+        validatePolicyTypeMatchesYaml(data.content, policyType);
 
         // Additional Gateway API validation (more detailed schema checks)
         if (isGatewayAPIType(policyType)) {
@@ -750,30 +762,34 @@ export const policyRouter = createTRPCRouter({
         validateGatewayAPIPolicy(input.yamlContent, input.policyType);
       }
 
-      // Create the policy
-      const policy = await ctx.db.policy.create({
-        data: {
-          name: input.name,
-          description: input.description ?? `Imported ${input.policyType.replace("GATEWAY_", "")} from cluster`,
-          type: input.policyType as "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE" | "GATEWAY_TLSROUTE",
-          content: input.yamlContent,
-          targetNamespaces: [input.namespace],
-          status: "DEPLOYED", // Already deployed in cluster
-          deployedAt: new Date(),
-          organizationId: ctx.organizationId,
-          clusterId: input.clusterId,
-          createdById: ctx.userId,
-        },
-      });
+      // Create policy and initial version in a transaction
+      const policy = await ctx.db.$transaction(async (tx) => {
+        const newPolicy = await tx.policy.create({
+          data: {
+            name: input.name,
+            description: input.description ?? `Imported ${input.policyType.replace("GATEWAY_", "")} from cluster`,
+            type: input.policyType as "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE" | "GATEWAY_TLSROUTE",
+            content: input.yamlContent,
+            targetNamespaces: [input.namespace],
+            status: "DEPLOYED", // Already deployed in cluster
+            deployedAt: new Date(),
+            organizationId: ctx.organizationId,
+            clusterId: input.clusterId,
+            createdById: ctx.userId,
+          },
+        });
 
-      // Create initial version
-      await ctx.db.policyVersion.create({
-        data: {
-          policyId: policy.id,
-          version: 1,
-          content: input.yamlContent,
-          changelog: "Imported from cluster",
-        },
+        // Create initial version
+        await tx.policyVersion.create({
+          data: {
+            policyId: newPolicy.id,
+            version: 1,
+            content: input.yamlContent,
+            changelog: "Imported from cluster",
+          },
+        });
+
+        return newPolicy;
       });
 
       return policy;

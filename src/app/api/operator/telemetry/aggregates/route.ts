@@ -135,9 +135,7 @@ export async function POST(request: NextRequest) {
 
     // Store process summaries
     // The collector sends topBinaries array, so we need to expand each binary into a separate record
-    console.log("[Telemetry] Received processSummaries:", data.processSummaries?.length ?? 0);
     if (data.processSummaries && data.processSummaries.length > 0) {
-      console.log("[Telemetry] First summary:", JSON.stringify(data.processSummaries[0], null, 2));
       const processData: Array<{
         clusterId: string;
         timestamp: Date;
@@ -186,16 +184,11 @@ export async function POST(request: NextRequest) {
         // Skip summaries with no binary info (no processName and no topBinaries)
       }
 
-      console.log("[Telemetry] Processed to", processData.length, "records from", data.processSummaries.length, "summaries");
-
       if (processData.length > 0) {
         await db.processSummary.createMany({
           data: processData,
           skipDuplicates: true,
         });
-        console.log("[Telemetry] Stored", processData.length, "process records for cluster", data.clusterId);
-      } else {
-        console.log("[Telemetry] WARNING: No process records to store - summaries may be missing topBinaries/processName");
       }
 
       processSummariesCount = processData.length;

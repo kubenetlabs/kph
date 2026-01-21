@@ -67,6 +67,89 @@ export function getExpectedKind(policyType: string): GatewayAPIKind | null {
 }
 
 /**
+ * Detects the policy type from YAML content by parsing the kind field.
+ * This enables bidirectional validation - given YAML, determine what policy type it should be.
+ *
+ * @param yamlContent - The raw YAML string to parse
+ * @returns The detected policy type (GATEWAY_HTTPROUTE, etc.) or null if not a Gateway API resource
+ * @throws TRPCError if YAML is invalid
+ */
+export function detectPolicyTypeFromYaml(yamlContent: string): string | null {
+  let doc: Record<string, unknown>;
+  try {
+    doc = yaml.load(yamlContent) as Record<string, unknown>;
+  } catch (e) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Invalid YAML syntax: ${e instanceof Error ? e.message : "parse error"}`,
+    });
+  }
+
+  if (!doc || typeof doc !== "object") {
+    return null;
+  }
+
+  const kind = doc.kind as string;
+  const apiVersion = doc.apiVersion as string;
+
+  // Must be a Gateway API resource
+  if (!apiVersion?.startsWith("gateway.networking.k8s.io/")) {
+    return null;
+  }
+
+  // Check if kind is a supported Gateway API route kind
+  if (!GATEWAY_API_KINDS.includes(kind as GatewayAPIKind)) {
+    return null;
+  }
+
+  return KIND_TO_POLICY_TYPE[kind as GatewayAPIKind] ?? null;
+}
+
+/**
+ * Validates that the provided policy type matches the YAML content's kind.
+ * Throws if there's a mismatch between what the user selected and what the YAML contains.
+ *
+ * @param yamlContent - The raw YAML string
+ * @param declaredPolicyType - The policy type the user selected
+ * @throws TRPCError if types don't match
+ */
+export function validatePolicyTypeMatchesYaml(
+  yamlContent: string,
+  declaredPolicyType: string
+): void {
+  const detectedType = detectPolicyTypeFromYaml(yamlContent);
+
+  // If it's not a Gateway API resource, skip bidirectional check
+  if (!detectedType && !isGatewayAPIType(declaredPolicyType)) {
+    return;
+  }
+
+  // If user declared Gateway type but YAML is not Gateway API
+  if (isGatewayAPIType(declaredPolicyType) && !detectedType) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Policy type ${declaredPolicyType} expects a Gateway API resource, but YAML does not contain a valid Gateway API kind`,
+    });
+  }
+
+  // If YAML is Gateway API but user declared non-Gateway type
+  if (detectedType && !isGatewayAPIType(declaredPolicyType)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `YAML contains Gateway API ${detectedType} resource, but policy type was set to ${declaredPolicyType}`,
+    });
+  }
+
+  // Both are Gateway API - verify they match
+  if (detectedType && detectedType !== declaredPolicyType) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Type mismatch: YAML contains ${detectedType} but policy type was set to ${declaredPolicyType}`,
+    });
+  }
+}
+
+/**
  * Parses and validates Gateway API YAML content
  *
  * @param yamlContent - The raw YAML string to parse

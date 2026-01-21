@@ -169,28 +169,9 @@ export async function POST(request: NextRequest) {
     let summariesUpserted = 0;
     let eventsCreated = 0;
 
-    // Log incoming data for debugging
-    console.log("[Validation API] Received data:", {
-      clusterId: auth.clusterId,
-      summaryCount: summaries?.length ?? 0,
-      eventCount: events?.length ?? 0,
-      summaries: summaries?.map(s => ({
-        hour: s.hour,
-        allowed: s.allowedCount,
-        blocked: s.blockedCount,
-        noPolicy: s.noPolicyCount,
-      })),
-    });
-
     // Upsert validation summaries with proper JSON merging
     if (summaries && summaries.length > 0) {
       for (const summary of summaries) {
-        console.log("[Validation API] Upserting summary:", {
-          clusterId: auth.clusterId,
-          hour: summary.hour,
-          blocked: summary.blockedCount,
-        });
-
         // First check if record exists to properly merge JSON arrays
         const existing = await db.validationSummary.findUnique({
           where: {
@@ -270,12 +251,6 @@ export async function POST(request: NextRequest) {
       });
       eventsCreated = result.count;
     }
-
-    console.log("[Validation API] Successfully processed:", {
-      clusterId: auth.clusterId,
-      summariesUpserted,
-      eventsCreated,
-    });
 
     return NextResponse.json({
       success: true,

@@ -457,8 +457,6 @@ export const topologyRouter = createTRPCRouter({
         "cat", "head", "tail", "less", "more", // File readers (suspicious when accessing sensitive files)
       ];
 
-      console.log("[Topology] Querying processValidationEvent for cluster:", input.clusterId, "since:", since.toISOString(), "timeRange:", input.timeRange, "suspicious:", input.suspicious);
-
       // Build suspicious process filter for database-level filtering
       // Uses 'binary' field from processValidationEvent table
       const suspiciousProcessFilter = input.suspicious
@@ -503,8 +501,6 @@ export const topologyRouter = createTRPCRouter({
         orderBy: { timestamp: "desc" },
         take: 200,
       });
-
-      console.log("[Topology] Found", processEvents.length, "process validation events (suspicious filter at DB level:", !!input.suspicious, ")");
 
       // Aggregate and categorize events
       interface ProcessEvent {
@@ -569,8 +565,6 @@ export const topologyRouter = createTRPCRouter({
       const filteredEvents = input.suspicious
         ? events.filter((e) => e.isSuspicious)
         : events;
-
-      console.log("[Topology] After categorization:", events.length, "events, suspicious filter:", input.suspicious, "filtered to:", filteredEvents.length);
 
       // Summary stats
       const summary = {

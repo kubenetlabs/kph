@@ -457,29 +457,6 @@ export function simulateTracingPolicy(
     sampleAllowedProcesses: [],
   };
 
-  // Log parsed policy structure for debugging
-  console.log("[Evaluator] Parsed policy:", {
-    name: policy.metadata.name,
-    namespace: policy.metadata.namespace,
-    kind: policy.kind,
-    kprobesCount: policy.spec.kprobes?.length ?? 0,
-  });
-  if (policy.spec.kprobes?.[0]) {
-    const kp = policy.spec.kprobes[0];
-    console.log("[Evaluator] First kprobe:", {
-      call: kp.call,
-      syscall: kp.syscall,
-      selectorsCount: kp.selectors?.length ?? 0,
-    });
-    if (kp.selectors?.[0]) {
-      console.log("[Evaluator] First selector:", {
-        matchArgs: kp.selectors[0].matchArgs,
-        matchBinaries: kp.selectors[0].matchBinaries,
-        matchActions: kp.selectors[0].matchActions,
-      });
-    }
-  }
-
   // Evaluate each process
   for (const process of processes) {
     response.totalExecs += process.execCount;

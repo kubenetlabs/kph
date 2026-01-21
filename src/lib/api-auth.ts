@@ -2,6 +2,40 @@ import { NextResponse } from "next/server";
 import { db } from "~/lib/db";
 import { hashToken } from "~/lib/encryption";
 
+// Simple in-memory cache for token auth with 5-minute TTL
+const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+interface CachedAuth {
+  data: OperatorAuthContext | null;
+  expiresAt: number;
+}
+const tokenCache = new Map<string, CachedAuth>();
+
+function getCachedAuth(tokenHash: string): OperatorAuthContext | null | undefined {
+  const cached = tokenCache.get(tokenHash);
+  if (!cached) return undefined; // Not in cache
+  if (Date.now() > cached.expiresAt) {
+    tokenCache.delete(tokenHash);
+    return undefined; // Expired
+  }
+  return cached.data;
+}
+
+function setCachedAuth(tokenHash: string, data: OperatorAuthContext | null): void {
+  tokenCache.set(tokenHash, {
+    data,
+    expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
+  });
+  // Cleanup old entries periodically (every 100 sets)
+  if (tokenCache.size > 100) {
+    const now = Date.now();
+    for (const [key, value] of tokenCache) {
+      if (now > value.expiresAt) {
+        tokenCache.delete(key);
+      }
+    }
+  }
+}
+
 /**
  * Context returned after successful operator authentication.
  * Used for cluster-specific operations.
@@ -37,6 +71,12 @@ export async function authenticateOperatorToken(
   const token = authHeader.slice(7);
   const tokenHash = hashToken(token);
 
+  // Check cache first
+  const cached = getCachedAuth(tokenHash);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   try {
     const apiToken = await db.apiToken.findUnique({
       where: { tokenHash },
@@ -48,21 +88,25 @@ export async function authenticateOperatorToken(
 
     // Token not found
     if (!apiToken) {
+      setCachedAuth(tokenHash, null);
       return null;
     }
 
     // Token revoked
     if (apiToken.revokedAt) {
+      setCachedAuth(tokenHash, null);
       return null;
     }
 
     // Token expired
     if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
+      setCachedAuth(tokenHash, null);
       return null;
     }
 
     // Token must be associated with a cluster for operator auth
     if (!apiToken.clusterId) {
+      setCachedAuth(tokenHash, null);
       return null;
     }
 
@@ -72,12 +116,15 @@ export async function authenticateOperatorToken(
       data: { lastUsedAt: new Date() },
     });
 
-    return {
+    const authContext: OperatorAuthContext = {
       clusterId: apiToken.clusterId,
       organizationId: apiToken.organizationId,
       scopes: apiToken.scopes,
       tokenId: apiToken.id,
     };
+
+    setCachedAuth(tokenHash, authContext);
+    return authContext;
   } catch (error) {
     console.error("Error authenticating operator token:", error);
     return null;

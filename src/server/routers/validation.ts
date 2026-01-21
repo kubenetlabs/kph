@@ -58,13 +58,6 @@ export const validationRouter = createTRPCRouter({
         input.startTime ??
         new Date(endTime.getTime() - input.hours * 60 * 60 * 1000);
 
-      console.log("[Validation tRPC] getSummary query:", {
-        clusterId: input.clusterId,
-        hours: input.hours,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-      });
-
       // Get hourly summaries
       const summaries = await ctx.db.validationSummary.findMany({
         where: {
@@ -75,16 +68,6 @@ export const validationRouter = createTRPCRouter({
           },
         },
         orderBy: { hour: "asc" },
-      });
-
-      console.log("[Validation tRPC] Found summaries:", {
-        count: summaries.length,
-        summaries: summaries.map(s => ({
-          hour: s.hour.toISOString(),
-          allowed: s.allowedCount,
-          blocked: s.blockedCount,
-          noPolicy: s.noPolicyCount,
-        })),
       });
 
       // Calculate totals

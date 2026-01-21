@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -162,15 +161,10 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 
 		// For enforcement events, namespace may be empty because Tetragon kills
 		// the process before it fully enters the container namespace.
-		// Use policy name to provide context, or "enforcement" as fallback.
+		// Use "unknown" as fallback when namespace cannot be determined.
 		namespace := event.SrcNamespace
 		if namespace == "" {
-			// Try to infer namespace from policy name (e.g., "block-shell-in-llm-pods" -> llm related)
-			if strings.Contains(policy, "llm") {
-				namespace = "llm-system"
-			} else {
-				namespace = "tetragon-enforcement"
-			}
+			namespace = "unknown"
 		}
 
 		// Log enforcement events for visibility
@@ -227,14 +221,10 @@ func (r *ProcessValidationReporter) RecordTetragonEvent(event *models.TelemetryE
 		matchedPolicy = event.MatchedPolicies[0]
 	}
 
-	// For blocked events without namespace, infer from policy
+	// For blocked events without namespace, use "unknown" as fallback
 	eventNamespace := event.SrcNamespace
 	if verdict == "BLOCKED" && eventNamespace == "" {
-		if strings.Contains(matchedPolicy, "llm") {
-			eventNamespace = "llm-system"
-		} else {
-			eventNamespace = "tetragon-enforcement"
-		}
+		eventNamespace = "unknown"
 	}
 
 	eventRecord := ProcessValidationEvent{

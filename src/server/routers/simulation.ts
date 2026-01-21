@@ -470,12 +470,6 @@ export const simulationRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      console.log("[Tetragon Simulation] simulateTetragonPolicy mutation called with:", {
-        policyId: input.policyId,
-        clusterId: input.clusterId,
-        daysToAnalyze: input.daysToAnalyze,
-      });
-
       // Verify policy belongs to organization and is a Tetragon policy
       const policy = await ctx.db.policy.findFirst({
         where: {
@@ -546,35 +540,6 @@ export const simulationRouter = createTRPCRouter({
           },
         });
 
-        console.log("[Tetragon Simulation] Fetched ProcessSummary records:", processSummaries.length);
-        console.log("[Tetragon Simulation] Time range:", startTime.toISOString(), "to", endTime.toISOString());
-        console.log("[Tetragon Simulation] Policy namespace:", policy.content.includes("TracingPolicyNamespaced") ? "namespaced" : "cluster-wide");
-
-        // Log namespace breakdown
-        const namespaceBreakdown: Record<string, number> = {};
-        processSummaries.forEach(ps => {
-          namespaceBreakdown[ps.namespace] = (namespaceBreakdown[ps.namespace] ?? 0) + 1;
-        });
-        console.log("[Tetragon Simulation] Namespace breakdown:", namespaceBreakdown);
-
-        // Log sample of shell-related processes for debugging
-        const shellProcesses = processSummaries.filter(ps =>
-          ps.processName.endsWith('/sh') ||
-          ps.processName.endsWith('/bash') ||
-          ps.processName.endsWith('/zsh')
-        );
-        console.log("[Tetragon Simulation] Shell processes found:", shellProcesses.length);
-        if (shellProcesses.length > 0) {
-          console.log("[Tetragon Simulation] Sample shell processes:", shellProcesses.slice(0, 5).map(p => ({
-            namespace: p.namespace,
-            processName: p.processName,
-            execCount: p.execCount
-          })));
-        }
-
-        // Log the policy content preview
-        console.log("[Tetragon Simulation] Policy content preview:", policy.content.substring(0, 500));
-
         // Transform ProcessSummary records to the format expected by the evaluator
         const processInputs: ProcessSummaryInput[] = processSummaries.map((ps) => ({
           id: ps.id,
@@ -587,12 +552,6 @@ export const simulationRouter = createTRPCRouter({
 
         // Run the simulation
         const simulationResult = simulateTracingPolicy(policy.content, processInputs);
-
-        console.log("[Tetragon Simulation] Result:", {
-          totalProcesses: simulationResult.totalProcesses,
-          wouldBlockCount: simulationResult.wouldBlockCount,
-          wouldAllowCount: simulationResult.wouldAllowCount
-        });
 
         // Update simulation with results (serialize to JSON-safe format)
         const completedSimulation = await ctx.db.simulation.update({
