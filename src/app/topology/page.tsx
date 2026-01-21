@@ -22,7 +22,8 @@ export default function TopologyPage() {
   }
 
   // Fetch topology data
-  const { data: topologyData, isLoading } = trpc.topology.getGraph.useQuery(
+  // OPTIMIZATION: Added staleTime to prevent unnecessary refetches
+  const { data: topologyData, isLoading, isFetching } = trpc.topology.getGraph.useQuery(
     {
       clusterId: selectedClusterId,
       mode: mode === "simulation" ? "simulation" : "live",
@@ -35,8 +36,12 @@ export default function TopologyPage() {
     {
       enabled: !!selectedClusterId,
       refetchInterval: mode === "live" ? 30000 : undefined,
+      staleTime: 10000, // Consider data fresh for 10s - prevents refetch on filter changes
     }
   );
+
+  // DEBUG: Log fetch state changes (remove before production)
+  console.log('[Topology] isLoading:', isLoading, 'isFetching:', isFetching, 'hasData:', !!topologyData);
 
   // Fetch namespaces separately for complete coverage (24h window + policies)
   const { data: namespacesData, isLoading: namespacesLoading } = trpc.topology.getNamespaces.useQuery(
