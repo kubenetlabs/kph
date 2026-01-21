@@ -1,7 +1,7 @@
 # Topology Page Optimization - Status
 
 **Date:** 2026-01-21
-**Status:** Complete ✅
+**Status:** Partial Complete (3/5)
 
 ## Completed Optimizations
 
@@ -38,54 +38,41 @@ const aggregatedFlows = await ctx.db.flowSummary.groupBy({
 });
 ```
 
-### 4. Suspicious Binary Filter Optimization ✅
-**File:** `src/server/routers/topology.ts`
-**Status:** Complete
+## Remaining Optimizations (Future Work)
 
-**Problem solved:** Replaced 21 separate OR conditions with PostgreSQL's `ILIKE ANY`:
+### 4. Suspicious Binary Filter Optimization
+**File:** `src/server/routers/topology.ts` (lines ~460-490)
+**Status:** Not started (attempted, reverted due to SQL errors)
 
+**Problem:** 21 separate OR conditions with `contains` for suspicious binary detection:
 ```typescript
-// Before: 21 separate OR conditions (slow query planning)
 OR: [
   { binary: { contains: "/sh" } },
   { binary: { contains: "/bash" } },
   // ... 19 more conditions
 ]
-
-// After: Single optimized pattern match
-const SUSPICIOUS_BINARY_PATTERNS_SQL = Prisma.raw(`ARRAY[
-  '%/sh', '%/bash', '%/zsh', '%/dash', '%/ash',
-  '%/curl', '%/wget', '%/nc', '%/netcat', '%/ncat',
-  '%/python', '%/python3', '%/perl', '%/ruby',
-  '%/chmod', '%/chown', '%/base64', '%/nmap',
-  '%/cat', '%/head', '%/tail', '%/less', '%/more'
-]`);
-
-// Raw SQL query with ILIKE ANY
-WHERE binary ILIKE ANY(${SUSPICIOUS_BINARY_PATTERNS_SQL})
 ```
 
-**Impact:** ~50% faster process event queries when filtering for suspicious binaries
+**Attempted Solution:** `Prisma.raw()` with ILIKE ANY - caused runtime SQL syntax errors.
 
-### 5. Process Events Select Clause ✅
-**File:** `src/server/routers/topology.ts`
-**Status:** Complete
-
-Added explicit `select` clause for non-suspicious queries to reduce payload size:
-
+**Next approach to try:** Use `$queryRawUnsafe()` with hardcoded array string:
 ```typescript
-select: {
-  id: true,
-  clusterId: true,
-  timestamp: true,
-  verdict: true,
-  namespace: true,
-  podName: true,
-  binary: true,
-  arguments: true,
-  // ... only needed fields
-}
+const query = `
+  SELECT ... FROM process_validation_events
+  WHERE "clusterId" = $1 AND timestamp >= $2
+    AND binary ILIKE ANY(ARRAY['%/sh', '%/bash', ...])
+  ...
+`;
+await ctx.db.$queryRawUnsafe(query, clusterId, since);
 ```
+
+**Impact:** ~50% faster process event queries (when working)
+
+### 5. Process Events Select Clause
+**File:** `src/server/routers/topology.ts`
+**Status:** Not started
+
+Add explicit `select` clause to reduce payload size for process events query.
 
 ## Lessons Learned
 
@@ -93,8 +80,8 @@ select: {
 2. **Avoid complex callbacks** - `placeholderData: (prev) => prev` caused infinite re-renders
 3. **Use type-safe Prisma** - `groupBy` is safer than raw `$queryRaw`
 4. **Keep changes isolated** - Easier to debug when something breaks
-5. **Use `Prisma.raw()` for trusted constants** - Safe way to embed hardcoded SQL patterns
-6. **Combine optimizations** - Adding `ILIKE ANY` + explicit `select` in same change reduces testing overhead
+5. **Prisma.raw() doesn't work in $queryRaw** - The tagged template still parameterizes, causing SQL errors
+6. **Test raw SQL in preview first** - Always verify $queryRaw changes work before pushing to production
 
 ## Local Development Note
 
@@ -111,12 +98,12 @@ TypeError: useActionState is not a function
 
 ## Summary
 
-All 5 planned optimizations are now complete:
+3 of 5 planned optimizations complete:
 
 | # | Optimization | Type | Status |
 |---|--------------|------|--------|
 | 1 | React Query Caching | Frontend | ✅ |
 | 2 | Non-Blocking Refresh UX | Frontend | ✅ |
 | 3 | Database-Side Aggregation | Backend | ✅ |
-| 4 | ILIKE ANY Pattern Matching | Backend | ✅ |
-| 5 | Explicit Select Clause | Backend | ✅ |
+| 4 | ILIKE ANY Pattern Matching | Backend | ⏳ (reverted) |
+| 5 | Explicit Select Clause | Backend | ⏳ |
