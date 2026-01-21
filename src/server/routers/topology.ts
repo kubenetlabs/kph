@@ -1,19 +1,5 @@
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
-
-/**
- * Suspicious binary patterns for security monitoring
- * These patterns match common attack tools and shells
- * Used with PostgreSQL ILIKE ANY for efficient pattern matching
- */
-const SUSPICIOUS_BINARY_PATTERNS_SQL = Prisma.raw(`ARRAY[
-  '%/sh', '%/bash', '%/zsh', '%/dash', '%/ash',
-  '%/curl', '%/wget', '%/nc', '%/netcat', '%/ncat',
-  '%/python', '%/python3', '%/perl', '%/ruby',
-  '%/chmod', '%/chown', '%/base64', '%/nmap',
-  '%/cat', '%/head', '%/tail', '%/less', '%/more'
-]`);
 
 /**
  * Topology router
@@ -459,7 +445,7 @@ export const topologyRouter = createTRPCRouter({
 
       const since = new Date(Date.now() - timeRangeMinutes * 60 * 1000);
 
-      // Suspicious binaries that might indicate attacks (for client-side categorization)
+      // Suspicious binaries that might indicate attacks
       const suspiciousBinaries = [
         "sh", "bash", "zsh", "dash", "ash", // Shells
         "curl", "wget", "nc", "netcat", "ncat", // Network tools
@@ -470,82 +456,50 @@ export const topologyRouter = createTRPCRouter({
         "cat", "head", "tail", "less", "more", // File readers (suspicious when accessing sensitive files)
       ];
 
-      // Type for raw query results matching ProcessValidationEvent schema
-      interface ProcessValidationEventRow {
-        id: string;
-        clusterId: string;
-        timestamp: Date;
-        verdict: string;
-        namespace: string;
-        podName: string | null;
-        nodeName: string | null;
-        binary: string;
-        arguments: string | null;
-        parentBinary: string | null;
-        syscall: string | null;
-        filePath: string | null;
-        createdAt: Date;
-      }
+      // Build suspicious process filter for database-level filtering
+      // Uses 'binary' field from processValidationEvent table
+      const suspiciousProcessFilter = input.suspicious
+        ? {
+            OR: [
+              { binary: { contains: "/sh" } },
+              { binary: { contains: "/bash" } },
+              { binary: { contains: "/zsh" } },
+              { binary: { contains: "/dash" } },
+              { binary: { contains: "/ash" } },
+              { binary: { contains: "/curl" } },
+              { binary: { contains: "/wget" } },
+              { binary: { contains: "/nc" } },
+              { binary: { contains: "/netcat" } },
+              { binary: { contains: "/python" } },
+              { binary: { contains: "/perl" } },
+              { binary: { contains: "/ruby" } },
+              { binary: { contains: "/chmod" } },
+              { binary: { contains: "/chown" } },
+              { binary: { contains: "/base64" } },
+              { binary: { contains: "/nmap" } },
+              // File readers - often used to access sensitive files
+              { binary: { contains: "/cat" } },
+              { binary: { contains: "/head" } },
+              { binary: { contains: "/tail" } },
+              { binary: { contains: "/less" } },
+              { binary: { contains: "/more" } },
+            ],
+          }
+        : {};
 
       // Query processValidationEvent table (populated by collector via /api/operator/process-validation)
-      // OPTIMIZATION: When filtering for suspicious binaries, use raw SQL with ILIKE ANY
-      // This replaces 21 separate OR conditions with a single optimized pattern match
-      let processEvents: ProcessValidationEventRow[];
-
-      if (input.suspicious) {
-        // Use PostgreSQL ILIKE ANY for efficient pattern matching (~50% faster)
-        if (input.namespace) {
-          processEvents = await ctx.db.$queryRaw<ProcessValidationEventRow[]>`
-            SELECT id, "clusterId", timestamp, verdict, namespace, "podName", "nodeName",
-                   binary, arguments, "parentBinary", syscall, "filePath", "createdAt"
-            FROM process_validation_events
-            WHERE "clusterId" = ${input.clusterId}
-              AND timestamp >= ${since}
-              AND namespace = ${input.namespace}
-              AND binary ILIKE ANY(${SUSPICIOUS_BINARY_PATTERNS_SQL})
-            ORDER BY timestamp DESC
-            LIMIT 200
-          `;
-        } else {
-          processEvents = await ctx.db.$queryRaw<ProcessValidationEventRow[]>`
-            SELECT id, "clusterId", timestamp, verdict, namespace, "podName", "nodeName",
-                   binary, arguments, "parentBinary", syscall, "filePath", "createdAt"
-            FROM process_validation_events
-            WHERE "clusterId" = ${input.clusterId}
-              AND timestamp >= ${since}
-              AND binary ILIKE ANY(${SUSPICIOUS_BINARY_PATTERNS_SQL})
-            ORDER BY timestamp DESC
-            LIMIT 200
-          `;
-        }
-      } else {
-        // Non-suspicious query: use standard Prisma with explicit select
-        const result = await ctx.db.processValidationEvent.findMany({
-          where: {
-            clusterId: input.clusterId,
-            timestamp: { gte: since },
-            ...(input.namespace ? { namespace: input.namespace } : {}),
-          },
-          select: {
-            id: true,
-            clusterId: true,
-            timestamp: true,
-            verdict: true,
-            namespace: true,
-            podName: true,
-            nodeName: true,
-            binary: true,
-            arguments: true,
-            parentBinary: true,
-            syscall: true,
-            filePath: true,
-            createdAt: true,
-          },
-          orderBy: { timestamp: "desc" },
-          take: 200,
-        });
-        processEvents = result;
-      }
+      const processEvents = await ctx.db.processValidationEvent.findMany({
+        where: {
+          AND: [
+            { clusterId: input.clusterId },
+            { timestamp: { gte: since } },
+            ...(input.namespace ? [{ namespace: input.namespace }] : []),
+            ...(input.suspicious ? [suspiciousProcessFilter] : []),
+          ],
+        },
+        orderBy: { timestamp: "desc" },
+        take: 200,
+      });
 
       // Aggregate and categorize events
       interface ProcessEvent {
