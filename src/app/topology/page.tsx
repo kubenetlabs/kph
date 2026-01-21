@@ -40,8 +40,6 @@ export default function TopologyPage() {
     }
   );
 
-  // DEBUG: Log fetch state changes (remove before production)
-  console.log('[Topology] isLoading:', isLoading, 'isFetching:', isFetching, 'hasData:', !!topologyData);
 
   // Fetch namespaces separately for complete coverage (24h window + policies)
   const { data: namespacesData, isLoading: namespacesLoading } = trpc.topology.getNamespaces.useQuery(
