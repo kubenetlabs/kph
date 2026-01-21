@@ -19,8 +19,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/policy-hub/operator/internal/saas"
 	"github.com/policy-hub/operator/internal/telemetry/aggregator"
@@ -260,10 +262,16 @@ func main() {
 		if err != nil {
 			log.Error(err, "Failed to get in-cluster config for validation agent")
 		} else {
-			// Create scheme with Cilium CRDs registered
+			// Create scheme with core K8s types, Cilium, and Gateway API CRDs registered
 			scheme := runtime.NewScheme()
+			if err := clientgoscheme.AddToScheme(scheme); err != nil {
+				log.Error(err, "Failed to register core Kubernetes types in scheme")
+			}
 			if err := ciliumv2.AddToScheme(scheme); err != nil {
 				log.Error(err, "Failed to register Cilium types in scheme")
+			}
+			if err := gatewayv1.Install(scheme); err != nil {
+				log.Error(err, "Failed to register Gateway API types in scheme")
 			}
 
 			k8sClient, err := client.New(k8sConfig, client.Options{Scheme: scheme})
