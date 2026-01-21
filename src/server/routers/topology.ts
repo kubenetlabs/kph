@@ -126,7 +126,7 @@ export const topologyRouter = createTRPCRouter({
 
         if (!endpoints.has(srcId)) {
           endpoints.set(srcId, {
-            namespace: flow.srcNamespace || "external",
+            namespace: flow.srcNamespace ?? "external",
             podName: flow.srcPodName,
             flowCount: 0,
             isExternal: srcIsExternal,
@@ -143,7 +143,7 @@ export const topologyRouter = createTRPCRouter({
 
         if (!endpoints.has(dstId)) {
           endpoints.set(dstId, {
-            namespace: flow.dstNamespace || "external",
+            namespace: flow.dstNamespace ?? "external",
             podName: flow.dstPodName,
             flowCount: 0,
             isExternal: dstIsExternal,
