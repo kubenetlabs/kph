@@ -1,25 +1,5 @@
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
-
-/**
- * Schema for aggregated flow data from raw SQL query
- * Used to validate and type the GROUP BY results
- */
-const AggregatedFlowSchema = z.object({
-  srcNamespace: z.string().nullable(),
-  srcPodName: z.string().nullable(),
-  dstNamespace: z.string().nullable(),
-  dstPodName: z.string().nullable(),
-  dstPort: z.number(),
-  protocol: z.string(),
-  total_flows: z.bigint(),
-  allowed_flows: z.bigint(),
-  denied_flows: z.bigint(),
-  dropped_flows: z.bigint(),
-});
-
-type AggregatedFlow = z.infer<typeof AggregatedFlowSchema>;
 
 /**
  * Topology router
@@ -54,31 +34,58 @@ export const topologyRouter = createTRPCRouter({
 
       const since = new Date(Date.now() - timeRangeMinutes * 60 * 1000);
 
-      // Build namespace filter SQL fragment for raw query
-      const namespaceFilterSql = input.filters?.namespaces?.length
-        ? Prisma.sql`AND ("srcNamespace" = ANY(${input.filters.namespaces}) OR "dstNamespace" = ANY(${input.filters.namespaces}))`
-        : Prisma.empty;
+      // Query flow summaries for this cluster
+      // Run two queries in parallel: one for recent flows, one for dropped/denied flows
+      // This ensures policy-blocked traffic is visible even with high flow volumes
+      // Use OR to match either timestamp or windowStart for compatibility
+      const timeFilter = {
+        OR: [
+          { timestamp: { gte: since } },
+          { windowStart: { gte: since } },
+        ],
+      };
 
-      // Single aggregated query - much faster than fetching 700 raw records
-      // Database does the GROUP BY, reducing data transfer and JS processing
-      const aggregatedFlows = await ctx.db.$queryRaw<AggregatedFlow[]>`
-        SELECT
-          "srcNamespace",
-          "srcPodName",
-          "dstNamespace",
-          "dstPodName",
-          "dstPort",
-          "protocol",
-          SUM("totalFlows")::bigint as total_flows,
-          SUM("allowedFlows")::bigint as allowed_flows,
-          SUM("deniedFlows")::bigint as denied_flows,
-          COALESCE(SUM("droppedFlows"), 0)::bigint as dropped_flows
-        FROM "flow_summaries"
-        WHERE "clusterId" = ${input.clusterId}
-          AND ("timestamp" >= ${since} OR "windowStart" >= ${since})
-          ${namespaceFilterSql}
-        GROUP BY "srcNamespace", "srcPodName", "dstNamespace", "dstPodName", "dstPort", "protocol"
-      `;
+      const namespaceFilter = input.filters?.namespaces?.length ? {
+        OR: [
+          { srcNamespace: { in: input.filters.namespaces } },
+          { dstNamespace: { in: input.filters.namespaces } },
+        ],
+      } : {};
+
+      const baseWhere = {
+        clusterId: input.clusterId,
+        AND: [
+          timeFilter,
+          ...(Object.keys(namespaceFilter).length > 0 ? [namespaceFilter] : []),
+        ],
+      };
+
+      const [recentFlows, policyBlockedFlows] = await Promise.all([
+        ctx.db.flowSummary.findMany({
+          where: baseWhere,
+          orderBy: { timestamp: "desc" },
+          take: 500, // Reduced from 2000 for faster initial load
+        }),
+        // Ensure dropped/denied flows are always included
+        ctx.db.flowSummary.findMany({
+          where: {
+            ...baseWhere,
+            OR: [
+              { droppedFlows: { gt: 0 } },
+              { deniedFlows: { gt: 0 } },
+            ],
+          },
+          orderBy: { timestamp: "desc" },
+          take: 200, // Reduced from 500 for faster initial load
+        }),
+      ]);
+
+      // Merge and deduplicate by id
+      const flowMap = new Map<string, typeof recentFlows[0]>();
+      for (const flow of [...recentFlows, ...policyBlockedFlows]) {
+        flowMap.set(flow.id, flow);
+      }
+      const flowSummaries = Array.from(flowMap.values());
 
       // Build nodes and edges from flow data
       const nodes: Array<{
@@ -104,10 +111,10 @@ export const topologyRouter = createTRPCRouter({
         isExternal: boolean;
       }>();
 
-      // Process pre-aggregated flows from database
-      // Data is already grouped by src/dst/port/protocol, so we just need to track endpoints/namespaces
-      // Note: "deniedFlows" combines both deniedFlows and droppedFlows since Hubble uses DROPPED for policy blocks
-      const flowAggregates: Array<{
+      // Aggregate flows between endpoints
+      // Note: "deniedFlows" in the aggregate combines both deniedFlows and droppedFlows
+      // from the database, as Hubble marks policy-blocked traffic as DROPPED
+      const flowAggregates = new Map<string, {
         srcId: string;
         dstId: string;
         totalFlows: bigint;
@@ -115,9 +122,10 @@ export const topologyRouter = createTRPCRouter({
         deniedFlows: bigint;
         port: number;
         protocol: string;
-      }> = [];
+      }>();
 
-      for (const flow of aggregatedFlows) {
+      // Process flow summaries
+      for (const flow of flowSummaries) {
         // Track source endpoint
         const srcIsExternal = !flow.srcNamespace || flow.srcNamespace === "" || flow.srcNamespace === "external";
         const srcId = srcIsExternal
@@ -126,14 +134,14 @@ export const topologyRouter = createTRPCRouter({
 
         if (!endpoints.has(srcId)) {
           endpoints.set(srcId, {
-            namespace: flow.srcNamespace ?? "external",
+            namespace: flow.srcNamespace || "external",
             podName: flow.srcPodName,
             flowCount: 0,
             isExternal: srcIsExternal,
           });
         }
         const srcEndpoint = endpoints.get(srcId)!;
-        srcEndpoint.flowCount += Number(flow.total_flows);
+        srcEndpoint.flowCount += Number(flow.totalFlows);
 
         // Track destination endpoint
         const dstIsExternal = !flow.dstNamespace || flow.dstNamespace === "" || flow.dstNamespace === "external";
@@ -143,40 +151,47 @@ export const topologyRouter = createTRPCRouter({
 
         if (!endpoints.has(dstId)) {
           endpoints.set(dstId, {
-            namespace: flow.dstNamespace ?? "external",
+            namespace: flow.dstNamespace || "external",
             podName: flow.dstPodName,
             flowCount: 0,
             isExternal: dstIsExternal,
           });
         }
         const dstEndpoint = endpoints.get(dstId)!;
-        dstEndpoint.flowCount += Number(flow.total_flows);
+        dstEndpoint.flowCount += Number(flow.totalFlows);
 
         // Track namespaces
-        if (!srcIsExternal && flow.srcNamespace) {
+        if (!srcIsExternal) {
           if (!namespaces.has(flow.srcNamespace)) {
             namespaces.set(flow.srcNamespace, { workloadCount: 0, flowCount: 0 });
           }
-          namespaces.get(flow.srcNamespace)!.flowCount += Number(flow.total_flows);
+          namespaces.get(flow.srcNamespace)!.flowCount += Number(flow.totalFlows);
         }
-        if (!dstIsExternal && flow.dstNamespace) {
+        if (!dstIsExternal) {
           if (!namespaces.has(flow.dstNamespace)) {
             namespaces.set(flow.dstNamespace, { workloadCount: 0, flowCount: 0 });
           }
-          namespaces.get(flow.dstNamespace)!.flowCount += Number(flow.total_flows);
+          namespaces.get(flow.dstNamespace)!.flowCount += Number(flow.totalFlows);
         }
 
-        // Add to flow aggregates (already aggregated by database GROUP BY)
+        // Aggregate flows between this source and destination
+        const edgeKey = `${srcId}->${dstId}:${flow.dstPort}`;
+        if (!flowAggregates.has(edgeKey)) {
+          flowAggregates.set(edgeKey, {
+            srcId,
+            dstId,
+            totalFlows: BigInt(0),
+            allowedFlows: BigInt(0),
+            deniedFlows: BigInt(0),
+            port: flow.dstPort,
+            protocol: flow.protocol,
+          });
+        }
+        const agg = flowAggregates.get(edgeKey)!;
+        agg.totalFlows += flow.totalFlows;
+        agg.allowedFlows += flow.allowedFlows;
         // Combine deniedFlows + droppedFlows since Hubble uses DROPPED for policy blocks
-        flowAggregates.push({
-          srcId,
-          dstId,
-          totalFlows: flow.total_flows,
-          allowedFlows: flow.allowed_flows,
-          deniedFlows: flow.denied_flows + flow.dropped_flows,
-          port: flow.dstPort,
-          protocol: flow.protocol,
-        });
+        agg.deniedFlows += flow.deniedFlows + (flow.droppedFlows ?? BigInt(0));
       }
 
       // Count workloads per namespace
@@ -259,7 +274,7 @@ export const topologyRouter = createTRPCRouter({
 
       // Generate edges from flow aggregates
       // Create separate edges for allowed and denied traffic when both exist
-      for (const agg of flowAggregates) {
+      for (const [, agg] of flowAggregates) {
         // Skip self-loops
         if (agg.srcId === agg.dstId) continue;
 
@@ -346,7 +361,9 @@ export const topologyRouter = createTRPCRouter({
           deniedFlows,
           unprotectedFlows,
           policyCount: 0, // Would need to join with policies
-          dataAge: aggregatedFlows.length > 0 ? 0 : null, // Data is fresh from query
+          dataAge: flowSummaries[0]
+            ? Math.floor((Date.now() - flowSummaries[0].timestamp.getTime()) / 1000)
+            : null,
         },
       };
     }),
@@ -429,74 +446,61 @@ export const topologyRouter = createTRPCRouter({
 
       const since = new Date(Date.now() - timeRangeMinutes * 60 * 1000);
 
-      // Suspicious binary patterns for ILIKE ANY query
-      // Uses pattern matching: %/sh matches paths ending in /sh (e.g., /bin/sh)
-      const suspiciousBinaryPatterns = [
-        '%/sh', '%/bash', '%/zsh', '%/dash', '%/ash',      // Shells
-        '%/curl', '%/wget', '%/nc', '%/netcat', '%/ncat',  // Network tools
-        '%/python', '%/python3', '%/perl', '%/ruby',       // Scripting languages
-        '%/chmod', '%/chown', '%/base64', '%/xxd',         // System tools
-        '%/nmap', '%/masscan',                              // Scanning tools
-        '%/cat', '%/head', '%/tail', '%/less', '%/more',   // File readers
-      ];
-
-      // Suspicious binaries list for client-side categorization
+      // Suspicious binaries that might indicate attacks
       const suspiciousBinaries = [
-        "sh", "bash", "zsh", "dash", "ash",
-        "curl", "wget", "nc", "netcat", "ncat",
-        "python", "python3", "perl", "ruby",
-        "chmod", "chown", "base64", "xxd",
-        "nmap", "masscan",
-        "cat", "head", "tail", "less", "more",
+        "sh", "bash", "zsh", "dash", "ash", // Shells
+        "curl", "wget", "nc", "netcat", "ncat", // Network tools
+        "python", "python3", "perl", "ruby", // Scripting languages
+        "chmod", "chown", // Permission changes
+        "base64", "xxd", // Encoding tools
+        "nmap", "masscan", // Scanning tools
+        "cat", "head", "tail", "less", "more", // File readers (suspicious when accessing sensitive files)
       ];
 
-      // Build namespace filter SQL fragment
-      const namespaceFilterSql = input.namespace
-        ? Prisma.sql`AND "namespace" = ${input.namespace}`
-        : Prisma.empty;
+      // Build suspicious process filter for database-level filtering
+      // Uses 'binary' field from processValidationEvent table
+      const suspiciousProcessFilter = input.suspicious
+        ? {
+            OR: [
+              { binary: { contains: "/sh" } },
+              { binary: { contains: "/bash" } },
+              { binary: { contains: "/zsh" } },
+              { binary: { contains: "/dash" } },
+              { binary: { contains: "/ash" } },
+              { binary: { contains: "/curl" } },
+              { binary: { contains: "/wget" } },
+              { binary: { contains: "/nc" } },
+              { binary: { contains: "/netcat" } },
+              { binary: { contains: "/python" } },
+              { binary: { contains: "/perl" } },
+              { binary: { contains: "/ruby" } },
+              { binary: { contains: "/chmod" } },
+              { binary: { contains: "/chown" } },
+              { binary: { contains: "/base64" } },
+              { binary: { contains: "/nmap" } },
+              // File readers - often used to access sensitive files
+              { binary: { contains: "/cat" } },
+              { binary: { contains: "/head" } },
+              { binary: { contains: "/tail" } },
+              { binary: { contains: "/less" } },
+              { binary: { contains: "/more" } },
+            ],
+          }
+        : {};
 
-      // Query processValidationEvent table
-      // Use raw SQL with ILIKE ANY for suspicious filter (much faster than 21 OR conditions)
-      // Use Prisma findMany for non-suspicious (simpler, type-safe)
-      type ProcessValidationEventRow = {
-        id: string;
-        timestamp: Date;
-        namespace: string;
-        podName: string | null;
-        binary: string;
-        arguments: string | null;
-        verdict: string;
-      };
-
-      const processEvents: ProcessValidationEventRow[] = input.suspicious
-        ? await ctx.db.$queryRaw<ProcessValidationEventRow[]>`
-            SELECT "id", "timestamp", "namespace", "podName", "binary", "arguments", "verdict"
-            FROM "process_validation_events"
-            WHERE "clusterId" = ${input.clusterId}
-              AND "timestamp" >= ${since}
-              ${namespaceFilterSql}
-              AND "binary" ILIKE ANY(${suspiciousBinaryPatterns})
-            ORDER BY "timestamp" DESC
-            LIMIT 200
-          `
-        : await ctx.db.processValidationEvent.findMany({
-            where: {
-              clusterId: input.clusterId,
-              timestamp: { gte: since },
-              ...(input.namespace ? { namespace: input.namespace } : {}),
-            },
-            select: {
-              id: true,
-              timestamp: true,
-              namespace: true,
-              podName: true,
-              binary: true,
-              arguments: true,
-              verdict: true,
-            },
-            orderBy: { timestamp: "desc" },
-            take: 200,
-          });
+      // Query processValidationEvent table (populated by collector via /api/operator/process-validation)
+      const processEvents = await ctx.db.processValidationEvent.findMany({
+        where: {
+          AND: [
+            { clusterId: input.clusterId },
+            { timestamp: { gte: since } },
+            ...(input.namespace ? [{ namespace: input.namespace }] : []),
+            ...(input.suspicious ? [suspiciousProcessFilter] : []),
+          ],
+        },
+        orderBy: { timestamp: "desc" },
+        take: 200,
+      });
 
       // Aggregate and categorize events
       interface ProcessEvent {
@@ -557,21 +561,26 @@ export const topologyRouter = createTRPCRouter({
         };
       });
 
-      // Summary stats (no post-filter needed - DB handles suspicious filter via ILIKE ANY)
+      // Filter to suspicious only if requested (already filtered at DB level, but double-check)
+      const filteredEvents = input.suspicious
+        ? events.filter((e) => e.isSuspicious)
+        : events;
+
+      // Summary stats
       const summary = {
-        totalEvents: events.length,
-        suspiciousEvents: events.filter((e) => e.isSuspicious).length,
-        shellExecutions: events.filter((e) => e.category === "shell").length,
-        networkTools: events.filter((e) => e.category === "network_tool").length,
-        scriptingLanguages: events.filter((e) => e.category === "scripting").length,
-        fileReaders: events.filter((e) => e.category === "file_reader").length,
-        uniqueNamespaces: [...new Set(events.map((e) => e.namespace))].length,
-        uniquePods: [...new Set(events.map((e) => `${e.namespace}/${e.podName}`))].length,
+        totalEvents: filteredEvents.length,
+        suspiciousEvents: filteredEvents.filter((e) => e.isSuspicious).length,
+        shellExecutions: filteredEvents.filter((e) => e.category === "shell").length,
+        networkTools: filteredEvents.filter((e) => e.category === "network_tool").length,
+        scriptingLanguages: filteredEvents.filter((e) => e.category === "scripting").length,
+        fileReaders: filteredEvents.filter((e) => e.category === "file_reader").length,
+        uniqueNamespaces: [...new Set(filteredEvents.map((e) => e.namespace))].length,
+        uniquePods: [...new Set(filteredEvents.map((e) => `${e.namespace}/${e.podName}`))].length,
       };
 
       // Group by namespace/pod for display
       const groupedByPod = new Map<string, ProcessEvent[]>();
-      for (const event of events) {
+      for (const event of filteredEvents) {
         const key = `${event.namespace}/${event.podName}`;
         if (!groupedByPod.has(key)) {
           groupedByPod.set(key, []);
@@ -592,7 +601,7 @@ export const topologyRouter = createTRPCRouter({
       podGroups.sort((a, b) => b.suspiciousCount - a.suspiciousCount);
 
       return {
-        events: events.slice(0, 100), // Return top 100 events
+        events: filteredEvents.slice(0, 100), // Return top 100 events
         podGroups: podGroups.slice(0, 20), // Return top 20 pods
         summary,
       };
