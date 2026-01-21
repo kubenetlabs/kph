@@ -79,34 +79,33 @@ export const deploymentRouter = createTRPCRouter({
 
   // Get deployment stats across all policies (for dashboard)
   getStats: protectedProcedure.query(async ({ ctx }) => {
-    const [total, succeeded, failed, pending, inProgress, rolledBack, recentActivity] =
-      await Promise.all([
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId } },
-        }),
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId }, status: "SUCCEEDED" },
-        }),
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId }, status: "FAILED" },
-        }),
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId }, status: "PENDING" },
-        }),
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId }, status: "IN_PROGRESS" },
-        }),
-        ctx.db.policyDeployment.count({
-          where: { policy: { organizationId: ctx.organizationId }, status: "ROLLED_BACK" },
-        }),
-        // Count deployments in last 24 hours
-        ctx.db.policyDeployment.count({
-          where: {
-            policy: { organizationId: ctx.organizationId },
-            requestedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-          },
-        }),
-      ]);
+    // Use groupBy to get all status counts in a single query (instead of 6 separate count() calls)
+    const [statusCounts, recentActivity] = await Promise.all([
+      ctx.db.policyDeployment.groupBy({
+        by: ["status"],
+        where: { policy: { organizationId: ctx.organizationId } },
+        _count: { _all: true },
+      }),
+      // Count deployments in last 24 hours
+      ctx.db.policyDeployment.count({
+        where: {
+          policy: { organizationId: ctx.organizationId },
+          requestedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+    ]);
+
+    // Extract counts from groupBy result
+    const countByStatus = Object.fromEntries(
+      statusCounts.map((s) => [s.status, s._count._all])
+    ) as Record<string, number>;
+
+    const succeeded = countByStatus.SUCCEEDED ?? 0;
+    const failed = countByStatus.FAILED ?? 0;
+    const pending = countByStatus.PENDING ?? 0;
+    const inProgress = countByStatus.IN_PROGRESS ?? 0;
+    const rolledBack = countByStatus.ROLLED_BACK ?? 0;
+    const total = statusCounts.reduce((sum, s) => sum + s._count._all, 0);
 
     // Get active deployments (pending or in progress)
     const activeDeployments = await ctx.db.policyDeployment.findMany({

@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       policyType: sim.policy.type,
       startTime: sim.startTime.toISOString(),
       endTime: sim.endTime.toISOString(),
-      namespaces: sim.policy.targetNamespaces.length > 0
+      namespaces: (sim.policy.targetNamespaces?.length ?? 0) > 0
         ? sim.policy.targetNamespaces
         : undefined,
       includeDetails: true,

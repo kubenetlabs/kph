@@ -40,6 +40,7 @@ export const marketplaceRouter = createTRPCRouter({
         }),
       };
 
+      // Single query: fetch packs with counts AND check if current org has installed
       const packs = await ctx.db.policyPack.findMany({
         where,
         orderBy: [{ tier: "asc" }, { name: "asc" }],
@@ -50,19 +51,14 @@ export const marketplaceRouter = createTRPCRouter({
               installations: true,
             },
           },
+          // Include installations for current org to check installed status
+          installations: {
+            where: { organizationId: ctx.organizationId },
+            select: { id: true },
+            take: 1, // Only need to know if at least one exists
+          },
         },
       });
-
-      // Check if user has installed each pack
-      const installations = await ctx.db.policyPackInstallation.findMany({
-        where: {
-          organizationId: ctx.organizationId,
-          packId: { in: packs.map((p) => p.id) },
-        },
-        select: { packId: true },
-      });
-
-      const installedPackIds = new Set(installations.map((i) => i.packId));
 
       return {
         packs: packs.map((pack) => ({
@@ -78,7 +74,7 @@ export const marketplaceRouter = createTRPCRouter({
           tags: pack.tags,
           policyCount: pack._count.policies,
           installCount: pack._count.installations,
-          isInstalled: installedPackIds.has(pack.id),
+          isInstalled: pack.installations.length > 0,
           isAccessible: pack.tier === "COMMUNITY" || hasEnterprise,
         })),
         hasEnterprise,
