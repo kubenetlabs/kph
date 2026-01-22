@@ -26,6 +26,10 @@ agent:
 # Namespace for all components
 namespace: kph-system
 
+# Set to true if you want the chart to create the namespace
+# Set to false (default) when using helm install --create-namespace
+createNamespace: false
+
 # Operator settings
 operator:
   image:

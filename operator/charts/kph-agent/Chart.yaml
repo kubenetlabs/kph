@@ -2,7 +2,7 @@ apiVersion: v2
 name: kph-agent
 description: Kubernetes Policy Hub Agent - manages Cilium network policies, Tetragon policies, and Gateway API routes
 type: application
-version: 0.1.0
+version: 0.1.2
 appVersion: "0.1.0"
 keywords:
   - kubernetes

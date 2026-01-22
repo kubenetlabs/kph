@@ -1,3 +1,4 @@
+{{- if .Values.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -6,3 +7,4 @@ metadata:
     app.kubernetes.io/name: kph-agent
     app.kubernetes.io/part-of: policy-hub
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}

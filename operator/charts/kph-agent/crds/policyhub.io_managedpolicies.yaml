@@ -1,0 +1,183 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: managedpolicies.policyhub.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+spec:
+  group: policyhub.io
+  names:
+    kind: ManagedPolicy
+    listKind: ManagedPolicyList
+    plural: managedpolicies
+    shortNames:
+      - mp
+    singular: managedpolicy
+  scope: Namespaced
+  versions:
+    - additionalPrinterColumns:
+        - jsonPath: .spec.policyType
+          name: Type
+          type: string
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .status.deployedVersion
+          name: Version
+          type: integer
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: ManagedPolicy is the Schema for the managedpolicies API
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: ManagedPolicySpec defines the desired state of ManagedPolicy
+              properties:
+                content:
+                  description: Content is the raw YAML content of the policy
+                  type: string
+                description:
+                  description: Description provides additional context about the policy
+                  type: string
+                name:
+                  description: Name is the human-readable name of the policy
+                  type: string
+                paused:
+                  default: false
+                  description: Paused prevents the policy from being reconciled
+                  type: boolean
+                policyId:
+                  description: PolicyID is the unique identifier from the SaaS platform
+                  type: string
+                policyType:
+                  description: PolicyType specifies the type of policy (Cilium, Tetragon, Gateway API)
+                  enum:
+                    - CILIUM_NETWORK
+                    - CILIUM_CLUSTERWIDE
+                    - TETRAGON
+                    - GATEWAY_HTTPROUTE
+                    - GATEWAY_GRPCROUTE
+                    - GATEWAY_TCPROUTE
+                  type: string
+                targetNamespaces:
+                  description: TargetNamespaces specifies where to deploy the policy
+                  items:
+                    type: string
+                  type: array
+                version:
+                  description: Version is the policy version from the SaaS platform
+                  minimum: 1
+                  type: integer
+              required:
+                - content
+                - name
+                - policyId
+                - policyType
+                - version
+              type: object
+            status:
+              description: ManagedPolicyStatus defines the observed state of ManagedPolicy
+              properties:
+                conditions:
+                  description: Conditions represent the latest available observations
+                  items:
+                    description: Condition contains details for one aspect of the current state
+                    properties:
+                      lastTransitionTime:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 32768
+                        type: string
+                      observedGeneration:
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                deployedResources:
+                  description: DeployedResources lists the Kubernetes resources created
+                  items:
+                    description: DeployedResource represents a Kubernetes resource created by the policy
+                    properties:
+                      apiVersion:
+                        description: APIVersion of the resource
+                        type: string
+                      kind:
+                        description: Kind of the resource
+                        type: string
+                      name:
+                        description: Name of the resource
+                        type: string
+                      namespace:
+                        description: Namespace of the resource (empty for cluster-scoped)
+                        type: string
+                      uid:
+                        description: UID of the resource
+                        type: string
+                    required:
+                      - apiVersion
+                      - kind
+                      - name
+                    type: object
+                  type: array
+                deployedVersion:
+                  description: DeployedVersion is the currently deployed version
+                  type: integer
+                lastDeployed:
+                  description: LastDeployed is when the policy was last successfully deployed
+                  format: date-time
+                  type: string
+                lastError:
+                  description: LastError contains the last error message if Phase is Failed
+                  type: string
+                observedGeneration:
+                  description: ObservedGeneration is the generation observed by the controller
+                  format: int64
+                  type: integer
+                phase:
+                  description: Phase represents the current deployment phase
+                  enum:
+                    - Pending
+                    - Deploying
+                    - Deployed
+                    - Failed
+                    - Deleting
+                  type: string
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}
