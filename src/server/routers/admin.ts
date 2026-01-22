@@ -416,6 +416,50 @@ export const adminRouter = createTRPCRouter({
     }),
 
   /**
+   * List all clusters across the platform
+   */
+  listClusters: superAdminProcedure
+    .input(
+      z.object({
+        limit: z.number().min(1).max(100).default(50),
+        cursor: z.string().optional(),
+        organizationId: z.string().optional(),
+        status: z.enum(["CONNECTED", "PENDING", "DEGRADED", "DISCONNECTED", "ERROR"]).optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const clusters = await ctx.db.cluster.findMany({
+        take: input.limit + 1,
+        cursor: input.cursor ? { id: input.cursor } : undefined,
+        where: {
+          ...(input.organizationId && { organizationId: input.organizationId }),
+          ...(input.status && { status: input.status }),
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+      });
+
+      let nextCursor: string | undefined;
+      if (clusters.length > input.limit) {
+        const nextItem = clusters.pop();
+        nextCursor = nextItem?.id;
+      }
+
+      return {
+        clusters,
+        nextCursor,
+      };
+    }),
+
+  /**
    * Get system configuration
    */
   getSystemConfig: superAdminProcedure
@@ -457,5 +501,94 @@ export const adminRouter = createTRPCRouter({
       });
 
       return config;
+    }),
+
+  /**
+   * Invite a user to any organization (SuperAdmin only)
+   */
+  inviteUser: superAdminProcedure
+    .input(
+      z.object({
+        email: z.string().email(),
+        organizationId: z.string(),
+        role: z.enum(["ORG_ADMIN", "CLUSTER_ADMIN", "POLICY_EDITOR", "VIEWER"]).default("VIEWER"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify organization exists
+      const org = await ctx.db.organization.findUnique({
+        where: { id: input.organizationId },
+      });
+
+      if (!org) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      // Check if user is already in the organization
+      const existingUser = await ctx.db.user.findFirst({
+        where: {
+          email: input.email,
+          organizationId: input.organizationId,
+        },
+      });
+
+      if (existingUser) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "User is already a member of this organization",
+        });
+      }
+
+      // Check if there's already a pending invitation
+      const existingInvitation = await ctx.db.invitation.findFirst({
+        where: {
+          email: input.email,
+          organizationId: input.organizationId,
+          acceptedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+
+      if (existingInvitation) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An invitation for this email is already pending",
+        });
+      }
+
+      // Calculate expiry date (7 days)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      // Create the invitation
+      const invitation = await ctx.db.invitation.create({
+        data: {
+          email: input.email.toLowerCase(),
+          organizationId: input.organizationId,
+          role: input.role,
+          invitedById: ctx.userId,
+          expiresAt,
+        },
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+      });
+
+      return {
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expiresAt,
+        organization: invitation.organization,
+      };
     }),
 });
