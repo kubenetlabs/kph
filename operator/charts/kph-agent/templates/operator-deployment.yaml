@@ -33,17 +33,17 @@ spec:
             - name: CLUSTER_ID
               valueFrom:
                 secretKeyRef:
-                  name: kph-agent-credentials
+                  name: kph-agent-config
                   key: cluster-id
             - name: SAAS_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: kph-agent-credentials
+                  name: kph-agent-config
                   key: saas-endpoint
             - name: SAAS_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: kph-agent-credentials
+                  name: {{ .Values.agent.existingSecret | default "kph-agent-token" }}
                   key: api-token
           ports:
             - name: metrics

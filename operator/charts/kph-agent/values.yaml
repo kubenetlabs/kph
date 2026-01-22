@@ -9,7 +9,13 @@ agent:
   organizationId: ""
 
   # Authentication token from KPH SaaS
+  # Option 1: Provide token directly (less secure - visible in shell history)
   token: ""
+
+  # Option 2: Use an existing secret (recommended for security)
+  # Create the secret first: kubectl create secret generic kph-agent-token --from-literal=api-token=YOUR_TOKEN
+  # Then set existingSecret to the secret name
+  existingSecret: ""
 
   # KPH SaaS server URL
   serverUrl: "https://policy-hub-starter.vercel.app"
