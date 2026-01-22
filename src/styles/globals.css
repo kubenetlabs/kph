@@ -135,34 +135,34 @@
     @apply text-xs text-muted;
   }
 
-  /* Form inputs */
+  /* Form inputs - WCAG AA compliant focus rings */
   .input {
-    @apply w-full rounded-md border border-card-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply w-full rounded-md border border-card-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/30;
   }
 
   .input-error {
-    @apply input border-danger focus:border-danger focus:ring-danger;
+    @apply input border-danger focus:border-danger focus:ring-danger/30;
   }
 
-  /* Buttons */
+  /* Buttons - WCAG AA compliant focus rings (3px minimum) */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-[3px] focus:ring-offset-2 focus:ring-offset-background disabled:pointer-events-none disabled:opacity-50;
   }
 
   .btn-primary {
-    @apply btn bg-primary text-primary-foreground hover:bg-primary-600 focus:ring-primary;
+    @apply btn bg-primary text-primary-foreground hover:bg-primary-600 focus:ring-primary/50;
   }
 
   .btn-secondary {
-    @apply btn bg-card text-foreground border border-card-border hover:bg-card-hover focus:ring-accent;
+    @apply btn bg-card text-foreground border border-card-border hover:bg-card-hover focus:ring-accent/50;
   }
 
   .btn-danger {
-    @apply btn bg-danger text-danger-foreground hover:bg-danger-dark focus:ring-danger;
+    @apply btn bg-danger text-danger-foreground hover:bg-danger-dark focus:ring-danger/50;
   }
 
   .btn-ghost {
-    @apply btn text-muted hover:bg-card hover:text-foreground;
+    @apply btn text-muted hover:bg-card hover:text-foreground focus:ring-primary/50;
   }
 
   /* Sidebar navigation */
@@ -198,6 +198,19 @@
    ============================================================================ */
 
 @layer utilities {
+  /* Focus ring utility - WCAG AA compliant (3px minimum) */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-[3px] focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  .focus-ring-accent {
+    @apply focus:outline-none focus:ring-[3px] focus:ring-accent/50 focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  .focus-ring-danger {
+    @apply focus:outline-none focus:ring-[3px] focus:ring-danger/50 focus:ring-offset-2 focus:ring-offset-background;
+  }
+
   /* Text gradient for headings */
   .text-gradient {
     @apply bg-gradient-to-r from-primary to-accent-light bg-clip-text text-transparent;

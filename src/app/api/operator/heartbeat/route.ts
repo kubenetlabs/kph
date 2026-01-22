@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "~/lib/db";
+import { cache, cacheKeys, cacheTTL } from "~/lib/cache";
 import {
   authenticateOperatorToken,
   unauthorized,
@@ -85,13 +86,20 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Check if there are pending policies that need operator action
-    const pendingPolicies = await db.policy.count({
-      where: {
-        clusterId: auth.clusterId,
-        status: "PENDING",
-      },
-    });
+    // Check if there are pending policies that need operator action (cached)
+    const cacheKey = cacheKeys.pendingPolicies(auth.clusterId);
+    let pendingPolicies = cache.get<number>(cacheKey);
+
+    if (pendingPolicies === null) {
+      // Cache miss - query database
+      pendingPolicies = await db.policy.count({
+        where: {
+          clusterId: auth.clusterId,
+          status: "PENDING",
+        },
+      });
+      cache.set(cacheKey, pendingPolicies, cacheTTL.pendingPolicies);
+    }
 
     return NextResponse.json({
       success: true,

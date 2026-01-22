@@ -425,36 +425,35 @@ export const policyRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Get policy stats for dashboard
+  // Get policy stats for dashboard (optimized: 2 queries instead of 5)
   getStats: protectedProcedure.query(async ({ ctx }) => {
-    const [total, deployed, simulating, drafts, byType] = await Promise.all([
-      ctx.db.policy.count({
+    const [statusCounts, typeCounts] = await Promise.all([
+      ctx.db.policy.groupBy({
+        by: ["status"],
         where: { organizationId: ctx.organizationId },
-      }),
-      ctx.db.policy.count({
-        where: { organizationId: ctx.organizationId, status: "DEPLOYED" },
-      }),
-      ctx.db.policy.count({
-        where: { organizationId: ctx.organizationId, status: "SIMULATING" },
-      }),
-      ctx.db.policy.count({
-        where: { organizationId: ctx.organizationId, status: "DRAFT" },
+        _count: { _all: true },
       }),
       ctx.db.policy.groupBy({
         by: ["type"],
         where: { organizationId: ctx.organizationId },
-        _count: true,
+        _count: { _all: true },
       }),
     ]);
+
+    // Calculate totals from status groupBy
+    const total = statusCounts.reduce((sum, s) => sum + s._count._all, 0);
+    const deployed = statusCounts.find((s) => s.status === "DEPLOYED")?._count._all ?? 0;
+    const simulating = statusCounts.find((s) => s.status === "SIMULATING")?._count._all ?? 0;
+    const drafts = statusCounts.find((s) => s.status === "DRAFT")?._count._all ?? 0;
 
     return {
       total,
       deployed,
       simulating,
       drafts,
-      byType: byType.reduce(
+      byType: typeCounts.reduce(
         (acc, item) => {
-          acc[item.type] = item._count;
+          acc[item.type] = item._count._all;
           return acc;
         },
         {} as Record<string, number>

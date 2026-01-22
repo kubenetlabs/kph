@@ -20,14 +20,15 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
+    // WCAG AA compliant focus rings (3px minimum)
     const baseStyles =
-      "inline-flex items-center justify-center rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
+      "inline-flex items-center justify-center rounded-md font-medium transition-colors focus:outline-none focus:ring-[3px] focus:ring-offset-2 focus:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
 
     const variants = {
-      primary: "bg-primary text-primary-foreground hover:bg-primary-600 focus:ring-primary",
-      secondary: "bg-card text-foreground border border-card-border hover:bg-card-hover focus:ring-accent",
-      danger: "bg-danger text-danger-foreground hover:bg-danger-dark focus:ring-danger",
-      ghost: "text-muted hover:bg-card hover:text-foreground",
+      primary: "bg-primary text-primary-foreground hover:bg-primary-600 focus:ring-primary/50",
+      secondary: "bg-card text-foreground border border-card-border hover:bg-card-hover focus:ring-accent/50",
+      danger: "bg-danger text-danger-foreground hover:bg-danger-dark focus:ring-danger/50",
+      ghost: "text-muted hover:bg-card hover:text-foreground focus:ring-primary/50",
     };
 
     const sizes = {
