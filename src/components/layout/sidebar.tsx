@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "~/lib/utils";
+import { trpc } from "~/lib/trpc";
 
 // Using simple SVG icons instead of heroicons for simplicity
 const icons = {
@@ -62,6 +63,21 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   ),
+  admin: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+  ),
+  users: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  ),
+  organizations: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+    </svg>
+  ),
 };
 
 interface NavItem {
@@ -87,12 +103,24 @@ const bottomNavigation: NavItem[] = [
   { name: "Settings", href: "/settings", icon: "settings" },
 ];
 
+const adminNavigation: NavItem[] = [
+  { name: "Admin Dashboard", href: "/admin", icon: "admin" },
+  { name: "Users", href: "/admin/users", icon: "users" },
+  { name: "Organizations", href: "/admin/organizations", icon: "organizations" },
+  { name: "System Settings", href: "/admin/settings", icon: "settings" },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const { data: user } = trpc.user.me.useQuery();
 
   const isActive = (href: string) => {
     if (href === "/dashboard") {
       return pathname === "/" || pathname === "/dashboard";
+    }
+    // Special handling for /admin to avoid matching /admin when on /admin/users etc.
+    if (href === "/admin") {
+      return pathname === "/admin";
     }
     return pathname.startsWith(href);
   };
@@ -130,6 +158,30 @@ export default function Sidebar() {
           </Link>
         ))}
       </nav>
+
+      {/* Admin Navigation (Super Admins only) */}
+      {user?.isSuperAdmin && (
+        <div className="border-t border-card-border px-2 py-4">
+          <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted">
+            Admin
+          </div>
+          {adminNavigation.map((item) => (
+            <Link
+              key={item.name}
+              href={item.href}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isActive(item.href)
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:bg-card-hover hover:text-foreground"
+              )}
+            >
+              {icons[item.icon]}
+              {item.name}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {/* Bottom Navigation */}
       <div className="border-t border-card-border px-2 py-4">

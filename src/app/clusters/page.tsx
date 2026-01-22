@@ -85,12 +85,20 @@ export default function ClustersPage() {
           </p>
         </div>
         {activeTab === "clusters" && (
-          <Button onClick={() => setIsModalOpen(true)}>
-            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add Cluster
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => router.push("/clusters/install")}>
+              <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Install Agent
+            </Button>
+            <Button onClick={() => setIsModalOpen(true)}>
+              <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add Cluster
+            </Button>
+          </div>
         )}
       </div>
 

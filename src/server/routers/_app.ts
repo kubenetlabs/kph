@@ -13,6 +13,7 @@ import { recommendationsRouter } from "./recommendations";
 import { adminRouter } from "./admin";
 import { invitationRouter } from "./invitation";
 import { tokenRouter } from "./token";
+import { userRouter } from "./user";
 
 /**
  * Root router for the application
@@ -33,6 +34,7 @@ export const appRouter = createTRPCRouter({
   admin: adminRouter,
   invitation: invitationRouter,
   token: tokenRouter,
+  user: userRouter,
 });
 
 // Export type for client usage
