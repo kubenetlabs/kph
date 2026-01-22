@@ -20,7 +20,16 @@ import {
 } from "~/lib/tokens";
 
 // Token scopes available for different token types
-const AGENT_SCOPES = ["cluster:read", "cluster:write", "policy:read", "policy:write", "flow:write"] as const;
+const AGENT_SCOPES = [
+  "cluster:read",
+  "cluster:write",
+  "policy:read",
+  "policy:write",
+  "flow:write",
+  "telemetry:write",
+  "simulation:read",
+  "validation:write",
+] as const;
 const API_SCOPES = ["policy:read", "policy:write", "cluster:read", "simulation:read", "simulation:write"] as const;
 
 export const tokenRouter = createTRPCRouter({
