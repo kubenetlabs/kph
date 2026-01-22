@@ -40,6 +40,7 @@ export interface HelmValuesConfig {
 export interface GeneratedInstallation {
   helmValues: string;
   helmCommand: string;
+  helmSecretCommand: string; // Separate secret creation command (not logged in shell history)
   kubectlCommand: string;
   manifestUrl: string;
 }
@@ -100,13 +101,32 @@ export function generateHelmValues(config: HelmValuesConfig): string {
 }
 
 /**
- * Generates the complete Helm install command
+ * Generates the kubectl command to create the agent token secret
+ * This should be run separately to avoid exposing the token in shell history
+ */
+export function generateSecretCommand(config: HelmValuesConfig): string {
+  const namespace = config.namespace ?? DEFAULT_NAMESPACE;
+
+  return `# Create namespace (if not exists)
+kubectl create namespace ${namespace} --dry-run=client -o yaml | kubectl apply -f -
+
+# Create secret with agent token
+# IMPORTANT: Set KPH_TOKEN environment variable first to avoid shell history exposure
+# export KPH_TOKEN='<your-token-here>'
+kubectl create secret generic kph-agent-token \\
+  --namespace ${namespace} \\
+  --from-literal=api-token="\${KPH_TOKEN}" \\
+  --dry-run=client -o yaml | kubectl apply -f -`;
+}
+
+/**
+ * Generates the complete Helm install command (without token - references secret)
  */
 export function generateHelmCommand(config: HelmValuesConfig): string {
   const namespace = config.namespace ?? DEFAULT_NAMESPACE;
   const releaseName = `kph-agent-${sanitizeName(config.clusterName)}`;
 
-  // Build command with inline --set flags for sensitive values
+  // Build command WITHOUT token - references existing secret
   const command = [
     "helm install",
     releaseName,
@@ -116,7 +136,7 @@ export function generateHelmCommand(config: HelmValuesConfig): string {
     `--set agent.clusterId=${config.clusterId}`,
     `--set agent.clusterName=${config.clusterName}`,
     `--set agent.organizationId=${config.organizationId}`,
-    `--set agent.token=${config.agentToken}`,
+    `--set agent.existingSecret=kph-agent-token`,
     `--set agent.serverUrl=${config.serverUrl}`,
   ];
 
@@ -142,6 +162,7 @@ export function generateHelmCommand(config: HelmValuesConfig): string {
 
 /**
  * Generates kubectl apply command for quick installation
+ * Uses environment variable to avoid exposing token in shell history
  */
 export function generateKubectlCommand(config: HelmValuesConfig): string {
   const namespace = config.namespace ?? DEFAULT_NAMESPACE;
@@ -150,9 +171,11 @@ export function generateKubectlCommand(config: HelmValuesConfig): string {
 kubectl create namespace ${namespace} --dry-run=client -o yaml | kubectl apply -f -
 
 # Create secret with agent token
+# IMPORTANT: Set KPH_TOKEN environment variable first to avoid shell history exposure
+# export KPH_TOKEN='<your-token-here>'
 kubectl create secret generic kph-agent-token \\
   --namespace ${namespace} \\
-  --from-literal=token=${config.agentToken} \\
+  --from-literal=api-token="\${KPH_TOKEN}" \\
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Apply agent manifest
@@ -178,6 +201,7 @@ export function generateInstallation(config: HelmValuesConfig): GeneratedInstall
   return {
     helmValues: generateHelmValues(config),
     helmCommand: generateHelmCommand(config),
+    helmSecretCommand: generateSecretCommand(config),
     kubectlCommand: generateKubectlCommand(config),
     manifestUrl: generateManifestUrl(config),
   };
@@ -185,11 +209,18 @@ export function generateInstallation(config: HelmValuesConfig): GeneratedInstall
 
 /**
  * Generates a one-liner installation script
+ * Note: Token should be set via KPH_TOKEN environment variable before running
  */
 export function generateOneLiner(config: HelmValuesConfig): string {
   const namespace = config.namespace ?? DEFAULT_NAMESPACE;
 
-  return `curl -sfL ${config.serverUrl}/api/install/script | CLUSTER_ID=${config.clusterId} TOKEN=${config.agentToken} NAMESPACE=${namespace} sh -`;
+  return `# Set token first (avoids shell history):
+# export KPH_TOKEN='<your-token-here>'
+
+curl -sfL ${config.serverUrl}/api/install/script | \\
+  CLUSTER_ID=${config.clusterId} \\
+  TOKEN="\${KPH_TOKEN}" \\
+  NAMESPACE=${namespace} sh -`;
 }
 
 /**
@@ -199,29 +230,50 @@ export function generateInstallInstructions(
   config: HelmValuesConfig,
   environment: "production" | "staging" | "development"
 ): string {
+  const namespace = config.namespace ?? DEFAULT_NAMESPACE;
+
   const baseInstructions = `# Kubernetes Policy Hub Agent Installation
 # Cluster: ${config.clusterName}
 # Environment: ${environment}
 
 `;
 
-  const securityNote =
-    environment === "production"
-      ? `# IMPORTANT: Store the agent token securely. Do not commit to version control.
-# Consider using a secrets manager like Vault, AWS Secrets Manager, or Kubernetes External Secrets.
+  const securityNote = `## Security Note
 
-`
-      : "";
+**IMPORTANT:** Never expose the agent token in shell commands or commit to version control.
 
-  const helmSection = `## Option 1: Helm Installation (Recommended)
+1. Store the token in a secure location (secrets manager, password manager, etc.)
+2. Set the token via environment variable before running installation commands
+3. Clear your shell history after installation if needed: \`history -c && history -w\`
+
+`;
+
+  const tokenSetup = `## Step 1: Set Token Environment Variable
 
 \`\`\`bash
+# Copy your token and set it (this won't be logged in shell history if you use read -s)
+read -s KPH_TOKEN
+# Paste your token and press Enter
+
+# Or export directly (less secure - visible in history):
+# export KPH_TOKEN='YOUR_TOKEN_HERE'
+\`\`\`
+
+`;
+
+  const helmSection = `## Step 2a: Helm Installation (Recommended)
+
+\`\`\`bash
+# Create namespace and secret
+${generateSecretCommand(config)}
+
+# Install the agent (references the secret created above)
 ${generateHelmCommand(config)}
 \`\`\`
 
 `;
 
-  const kubectlSection = `## Option 2: kubectl Installation
+  const kubectlSection = `## Step 2b: kubectl Installation (Alternative)
 
 \`\`\`bash
 ${generateKubectlCommand(config)}
@@ -229,7 +281,7 @@ ${generateKubectlCommand(config)}
 
 `;
 
-  const oneLinerSection = `## Option 3: Quick Install (Development Only)
+  const oneLinerSection = `## Step 2c: Quick Install (Development Only)
 
 \`\`\`bash
 ${generateOneLiner(config)}
@@ -237,23 +289,24 @@ ${generateOneLiner(config)}
 
 `;
 
-  const verificationSection = `## Verify Installation
+  const verificationSection = `## Step 3: Verify Installation
 
 \`\`\`bash
 # Check agent status
-kubectl get pods -n ${config.namespace ?? DEFAULT_NAMESPACE}
+kubectl get pods -n ${namespace}
 
 # View agent logs
-kubectl logs -n ${config.namespace ?? DEFAULT_NAMESPACE} -l app=kph-agent -f
+kubectl logs -n ${namespace} -l app=kph-agent -f
 
 # Check agent connectivity
-kubectl exec -n ${config.namespace ?? DEFAULT_NAMESPACE} deploy/kph-agent -- kph-agent status
+kubectl exec -n ${namespace} deploy/kph-agent -- kph-agent status
 \`\`\`
 `;
 
   return (
     baseInstructions +
     securityNote +
+    tokenSetup +
     helmSection +
     kubectlSection +
     (environment !== "production" ? oneLinerSection : "") +

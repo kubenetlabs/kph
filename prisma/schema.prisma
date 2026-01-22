@@ -339,6 +339,7 @@ model Policy {
 
   @@unique([clusterId, name])
   @@index([templateId])
+  @@index([organizationId, status])
   @@map("policies")
 }
 
@@ -594,6 +595,7 @@ model ValidationEvent {
   @@index([clusterId, timestamp])
   @@index([clusterId, verdict])
   @@index([timestamp]) // For TTL cleanup
+  @@index([clusterId, timestamp, verdict])
   @@map("validation_events")
 }
 
@@ -971,6 +973,7 @@ model FlowSummary {
   @@index([clusterId, timestamp])
   @@index([clusterId, srcNamespace, dstNamespace])
   @@index([windowStart, windowEnd])
+  @@index([clusterId, timestamp, srcNamespace, dstNamespace])
   @@map("flow_summaries")
 }
 
@@ -1123,6 +1126,7 @@ model ProcessValidationEvent {
   @@index([clusterId, timestamp])
   @@index([clusterId, verdict])
   @@index([timestamp]) // For TTL cleanup
+  @@index([clusterId, timestamp, verdict])
   @@map("process_validation_events")
 }
 

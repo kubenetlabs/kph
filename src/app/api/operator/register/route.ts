@@ -53,8 +53,14 @@ export async function POST(request: NextRequest) {
     const { operatorVersion, kubernetesVersion, nodeCount, namespaceCount } =
       validationResult.data;
 
-    // Generate a unique operator ID if not already set
-    const operatorId = crypto.randomUUID();
+    // Fetch existing cluster to preserve operatorId if already set
+    const existingCluster = await db.cluster.findUnique({
+      where: { id: auth.clusterId },
+      select: { operatorId: true },
+    });
+
+    // Only generate new operator ID if not already set (preserves identity across restarts)
+    const operatorId = existingCluster?.operatorId ?? crypto.randomUUID();
 
     // Update the cluster with operator info
     const cluster = await db.cluster.update({

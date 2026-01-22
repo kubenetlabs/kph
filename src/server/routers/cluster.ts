@@ -38,6 +38,7 @@ export const clusterRouter = createTRPCRouter({
         organizationId: ctx.organizationId,
       },
       orderBy: { createdAt: "desc" },
+      take: 1000, // Prevent unbounded queries for large organizations
       select: {
         id: true,
         name: true,

@@ -6,6 +6,7 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import {
   generateHelmCommand,
+  generateSecretCommand,
   generateKubectlCommand,
   generateOneLiner,
   generateHelmValues,
@@ -86,6 +87,8 @@ export default function ClusterInstallWizard({
   const [step, setStep] = useState<WizardStep>("method");
   const [method, setMethod] = useState<InstallMethod>("helm");
   const [copied, setCopied] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [config, setConfig] = useState({
     namespace: "kph-system",
     syncInterval: 60,
@@ -111,6 +114,12 @@ export default function ClusterInstallWizard({
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyToken = async () => {
+    await navigator.clipboard.writeText(agentToken);
+    setTokenCopied(true);
+    setTimeout(() => setTokenCopied(false), 2000);
   };
 
   const handleDownloadValues = () => {
@@ -286,33 +295,95 @@ export default function ClusterInstallWizard({
         <p className="mt-1 text-sm text-muted">
           {method === "values"
             ? "Download the values file and use it with your GitOps tooling."
-            : "Run the following command on your cluster."}
+            : "Follow the steps below to securely install the agent."}
         </p>
       </div>
 
-      {/* Token Warning */}
-      <div className="rounded-lg border border-yellow-600/50 bg-yellow-600/10 p-4">
+      {/* Step 1: Token (separate for security) */}
+      {method !== "values" && (
+        <div className="rounded-lg border border-card-border p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-medium text-foreground">Step 1: Copy Agent Token</h4>
+              <p className="mt-1 text-xs text-muted">
+                Set this as <code className="bg-black/30 px-1 rounded">KPH_TOKEN</code> environment variable before running commands.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowToken(!showToken)}
+                aria-label={showToken ? "Hide token" : "Show token"}
+              >
+                {showToken ? (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </Button>
+              <Button size="sm" onClick={handleCopyToken}>
+                {tokenCopied ? (
+                  <>
+                    <svg className="mr-1.5 h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Copy Token
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+          {showToken && (
+            <pre className="mt-3 rounded bg-black/50 p-3 text-xs text-yellow-400 font-mono break-all">
+              {agentToken}
+            </pre>
+          )}
+          <div className="mt-3 rounded bg-black/30 p-2 text-xs text-muted">
+            <code>export KPH_TOKEN=&apos;{showToken ? agentToken : "••••••••••••••••"}&apos;</code>
+          </div>
+        </div>
+      )}
+
+      {/* Security Note */}
+      <div className="rounded-lg border border-blue-600/50 bg-blue-600/10 p-4">
         <div className="flex gap-3">
-          <svg className="h-5 w-5 flex-shrink-0 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          <svg className="h-5 w-5 flex-shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
           <div>
-            <p className="text-sm font-medium text-yellow-500">Security Note</p>
-            <p className="mt-1 text-xs text-yellow-400/80">
-              The agent token is included in this command. Do not share or commit this to version control.
-              Store securely using a secrets manager.
+            <p className="text-sm font-medium text-blue-500">Security Best Practice</p>
+            <p className="mt-1 text-xs text-blue-400/80">
+              The token is not included in the commands below. Set the <code className="bg-black/30 px-1 rounded">KPH_TOKEN</code> environment
+              variable first to keep it out of your shell history.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Command/Values Display */}
-      <div className="relative">
-        <div className="absolute right-2 top-2 flex gap-2">
+      {/* Step 2: Command/Values Display */}
+      <div className="rounded-lg border border-card-border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-medium text-foreground">
+            {method === "values" ? "Values File" : `Step 2: Run ${method === "helm" ? "Helm" : method === "kubectl" ? "kubectl" : "Install"} Commands`}
+          </h4>
           <Button
             size="sm"
             variant="ghost"
             onClick={() => handleCopy(getInstallCommand())}
+            aria-label="Copy command"
           >
             {copied ? (
               <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -326,7 +397,7 @@ export default function ClusterInstallWizard({
           </Button>
         </div>
         <pre className="max-h-96 overflow-auto rounded-lg bg-black/50 p-4 text-xs text-green-400">
-          <code>{getInstallCommand()}</code>
+          <code>{method === "helm" ? `${generateSecretCommand(helmConfig)}\n\n# Then install the agent:\n${getInstallCommand()}` : getInstallCommand()}</code>
         </pre>
       </div>
 
@@ -353,7 +424,7 @@ export default function ClusterInstallWizard({
         <Button variant="ghost" onClick={() => setStep("configure")}>
           Back
         </Button>
-        <Button onClick={() => setStep("verify")}>I&apos;ve Run the Command</Button>
+        <Button onClick={() => setStep("verify")}>I&apos;ve Run the Commands</Button>
       </div>
     </div>
   );

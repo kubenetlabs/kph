@@ -85,11 +85,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Check if there are pending policies to sync
+    // Check if there are pending policies that need operator action
     const pendingPolicies = await db.policy.count({
       where: {
         clusterId: auth.clusterId,
-        status: { in: ["PENDING", "DEPLOYED"] },
+        status: "PENDING",
       },
     });
 
