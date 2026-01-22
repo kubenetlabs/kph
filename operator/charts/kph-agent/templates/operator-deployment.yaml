@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kph-operator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-operator
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kph-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kph-operator
+    spec:
+      serviceAccountName: kph-operator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+          env:
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: cluster-id
+            - name: SAAS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: saas-endpoint
+            - name: SAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: api-token
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.operator.resources.requests.cpu }}
+              memory: {{ .Values.operator.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.operator.resources.limits.cpu }}
+              memory: {{ .Values.operator.resources.limits.memory }}
+      terminationGracePeriodSeconds: 10

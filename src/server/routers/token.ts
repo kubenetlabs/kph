@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { Prisma, TokenStatus, TokenType } from "@prisma/client";
 import { createTRPCRouter, orgProtectedProcedure } from "../trpc";
 import { hasMinRole, logAudit } from "~/lib/permissions";
 import {
@@ -30,7 +31,7 @@ export const tokenRouter = createTRPCRouter({
     .input(
       z.object({
         name: z.string().min(1).max(100),
-        type: z.enum(["AGENT", "REGISTRATION", "API"]),
+        type: z.enum(["AGENT", "API"]),
         clusterId: z.string().optional(),
         scopes: z.array(z.string()).optional(),
         expiryDays: z.number().min(0).max(365).default(365),
@@ -134,7 +135,7 @@ export const tokenRouter = createTRPCRouter({
   list: orgProtectedProcedure
     .input(
       z.object({
-        type: z.enum(["AGENT", "REGISTRATION", "API", "all"]).default("all"),
+        type: z.enum(["AGENT", "API", "all"]).default("all"),
         clusterId: z.string().optional(),
         status: z.enum(["ACTIVE", "REVOKED", "EXPIRED", "all"]).default("all"),
         limit: z.number().min(1).max(100).default(50),
@@ -152,17 +153,17 @@ export const tokenRouter = createTRPCRouter({
 
       const now = new Date();
 
-      const whereClause = {
+      const whereClause: Prisma.ApiTokenWhereInput = {
         organizationId: ctx.organizationId,
-        ...(input.type !== "all" && { type: input.type }),
+        ...(input.type !== "all" && { type: input.type as TokenType }),
         ...(input.clusterId && { clusterId: input.clusterId }),
         ...(input.status === "ACTIVE" && {
-          status: "ACTIVE",
+          status: TokenStatus.ACTIVE,
           OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
         }),
-        ...(input.status === "REVOKED" && { status: "REVOKED" }),
+        ...(input.status === "REVOKED" && { status: TokenStatus.REVOKED }),
         ...(input.status === "EXPIRED" && {
-          status: "ACTIVE",
+          status: TokenStatus.ACTIVE,
           expiresAt: { lte: now },
         }),
       };
@@ -379,7 +380,7 @@ export const tokenRouter = createTRPCRouter({
       const tokenData =
         oldToken.type === "API"
           ? generateApiToken(input.expiryDays)
-          : generateAgentToken(oldToken.type as "AGENT" | "REGISTRATION", input.expiryDays);
+          : generateAgentToken(oldToken.type as "AGENT", input.expiryDays);
 
       // Transaction: revoke old, create new
       const [, newToken] = await ctx.db.$transaction([

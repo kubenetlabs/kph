@@ -36,16 +36,30 @@ interface ClusterFormData {
   region: string;
   environment: "PRODUCTION" | "STAGING" | "DEVELOPMENT" | "TESTING";
   endpoint: string;
+  authToken: string;
+  caCert?: string;
 }
 
 export default function ClustersPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>("clusters");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Fetch clusters from database
   const { data: clusters = [], isLoading, refetch } = trpc.cluster.list.useQuery();
+
+  // Create cluster mutation
+  const createClusterMutation = trpc.cluster.create.useMutation({
+    onSuccess: async () => {
+      await refetch();
+      setIsModalOpen(false);
+      setCreateError(null);
+    },
+    onError: (error) => {
+      setCreateError(error.message);
+    },
+  });
 
   const handleViewCluster = (clusterId: string) => {
     router.push(`/clusters/${clusterId}`);
@@ -55,17 +69,9 @@ export default function ClustersPage() {
     router.push(`/clusters/${clusterId}?edit=true`);
   };
 
-  const handleCreateCluster = async (_data: ClusterFormData) => {
-    setIsSubmitting(true);
-
-    // Simulate API call - in future, use trpc.cluster.create mutation
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // Refetch clusters to get the new one
-    await refetch();
-
-    setIsSubmitting(false);
-    setIsModalOpen(false);
+  const handleCreateCluster = async (data: ClusterFormData) => {
+    setCreateError(null);
+    createClusterMutation.mutate(data);
   };
 
   return (
@@ -294,7 +300,7 @@ export default function ClustersPage() {
         <CreateClusterForm
           onSubmit={handleCreateCluster}
           onCancel={() => setIsModalOpen(false)}
-          isLoading={isSubmitting}
+          isLoading={createClusterMutation.isPending}
         />
       </Modal>
     </AppShell>

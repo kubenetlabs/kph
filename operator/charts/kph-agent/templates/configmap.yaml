@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kph-collector-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-collector
+data:
+  HUBBLE_ADDRESS: {{ .Values.telemetry.hubble.address | quote }}
+  HUBBLE_ENABLED: {{ .Values.telemetry.hubble.enabled | quote }}
+  TETRAGON_ADDRESS: {{ .Values.telemetry.tetragon.address | quote }}
+  TETRAGON_ENABLED: {{ .Values.telemetry.tetragon.enabled | quote }}
+  STORAGE_PATH: {{ .Values.telemetry.storage.path | quote }}
+  RETENTION_DAYS: {{ .Values.telemetry.storage.retentionDays | quote }}
+  MAX_STORAGE_GB: {{ .Values.telemetry.storage.maxStorageGb | quote }}
+  BUFFER_SIZE: "10000"
+  FLUSH_INTERVAL: "30s"
+  SAAS_ENABLED: "true"
+  AGGREGATION_WINDOW: "1m"
+  SIMULATION_ENABLED: {{ .Values.features.simulation | quote }}
+  SIMULATION_POLL_INTERVAL: "30s"
+  VALIDATION_ENABLED: {{ .Values.features.validation | quote }}
+  VALIDATION_FLUSH_INTERVAL: "60s"
+  VALIDATION_SAMPLE_RATE: "10"
+  LOG_LEVEL: {{ .Values.agent.logLevel | quote }}

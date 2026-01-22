@@ -227,6 +227,7 @@ export type AuditAction =
   | "cluster.disconnected"
   | "token.created"
   | "token.revoked"
+  | "token.rotated"
   | "policy.created"
   | "policy.updated"
   | "policy.deployed"

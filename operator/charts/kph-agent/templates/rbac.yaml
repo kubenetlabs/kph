@@ -1,0 +1,121 @@
+# Operator Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kph-operator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-operator
+
+---
+# Collector Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kph-collector
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-collector
+
+---
+# Operator ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kph-operator-role
+rules:
+  # PolicyHubConfig permissions
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["policyhubconfigs/finalizers"]
+    verbs: ["update"]
+  # ManagedPolicy permissions
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["policyhub.io"]
+    resources: ["managedpolicies/finalizers"]
+    verbs: ["update"]
+  # Core resources
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Cilium Network Policies
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Standard Network Policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# Collector ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kph-collector-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes", "grpcroutes", "tcproutes", "tlsroutes"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Operator ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kph-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kph-operator-role
+subjects:
+  - kind: ServiceAccount
+    name: kph-operator
+    namespace: {{ .Values.namespace }}
+
+---
+# Collector ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kph-collector-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kph-collector-role
+subjects:
+  - kind: ServiceAccount
+    name: kph-collector
+    namespace: {{ .Values.namespace }}

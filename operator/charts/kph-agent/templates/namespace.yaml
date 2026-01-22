@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-agent
+    app.kubernetes.io/part-of: policy-hub
+    app.kubernetes.io/managed-by: {{ .Release.Service }}

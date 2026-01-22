@@ -1,0 +1,95 @@
+# KPH Agent Configuration
+# See https://github.com/henleda/kubernetes-policy-hub for documentation
+
+# Agent configuration (required)
+agent:
+  # Cluster identification - provided by KPH SaaS
+  clusterId: ""
+  clusterName: ""
+  organizationId: ""
+
+  # Authentication token from KPH SaaS
+  token: ""
+
+  # KPH SaaS server URL
+  serverUrl: "https://policy-hub-starter.vercel.app"
+
+  # Policy sync interval in seconds
+  syncInterval: 30
+
+  # Heartbeat interval in seconds
+  heartbeatInterval: 60
+
+  # Log level: debug, info, warn, error
+  logLevel: info
+
+# Namespace for all components
+namespace: kph-system
+
+# Operator settings
+operator:
+  image:
+    repository: 409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent
+    tag: latest
+    pullPolicy: Always
+
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Collector settings (telemetry collection via Hubble/Tetragon)
+collector:
+  enabled: true
+
+  image:
+    repository: 409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent
+    tag: latest
+    pullPolicy: Always
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+# Telemetry settings
+telemetry:
+  enabled: true
+
+  # Hubble integration
+  hubble:
+    enabled: true
+    address: "hubble-relay.kube-system.svc.cluster.local:80"
+
+  # Tetragon integration
+  tetragon:
+    enabled: false
+    address: "unix:///var/run/tetragon/tetragon.sock"
+
+  # Local storage settings
+  storage:
+    path: "/var/lib/policyhub/telemetry"
+    retentionDays: 7
+    maxStorageGb: 10
+
+# Feature flags
+features:
+  policySync: true
+  admissionWebhook: true
+  auditLogging: true
+  simulation: true
+  validation: true
+
+# Cluster metadata (optional)
+cluster:
+  provider: OTHER  # AWS, GCP, AZURE, ON_PREM, OTHER
+  region: ""
+  environment: DEVELOPMENT  # DEVELOPMENT, STAGING, PRODUCTION, TESTING

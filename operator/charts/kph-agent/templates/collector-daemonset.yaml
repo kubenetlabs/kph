@@ -1,0 +1,120 @@
+{{- if .Values.collector.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kph-collector
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-collector
+    app.kubernetes.io/component: telemetry
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kph-collector
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kph-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: kph-collector
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 65534:65534 {{ .Values.telemetry.storage.path }} && chmod -R 755 {{ .Values.telemetry.storage.path }}"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: telemetry-storage
+              mountPath: {{ .Values.telemetry.storage.path }}
+      containers:
+        - name: collector
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          command: ["/collector"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: cluster-id
+            - name: SAAS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: saas-endpoint
+            - name: SAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kph-agent-credentials
+                  key: api-token
+          envFrom:
+            - configMapRef:
+                name: kph-collector-config
+          ports:
+            - name: health
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: {{ .Values.collector.resources.requests.cpu }}
+              memory: {{ .Values.collector.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.collector.resources.limits.cpu | quote }}
+              memory: {{ .Values.collector.resources.limits.memory }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: telemetry-storage
+              mountPath: {{ .Values.telemetry.storage.path }}
+            - name: tetragon-sock
+              mountPath: /var/run/tetragon
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: telemetry-storage
+          hostPath:
+            path: {{ .Values.telemetry.storage.path }}
+            type: DirectoryOrCreate
+        - name: tetragon-sock
+          hostPath:
+            path: /var/run/tetragon
+            type: DirectoryOrCreate
+        - name: tmp
+          emptyDir: {}
+{{- end }}
