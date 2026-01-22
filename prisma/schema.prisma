@@ -31,6 +31,8 @@ model Organization {
   packInstallations PolicyPackInstallation[]
   createdPacks      PolicyPack[] @relation("OrgCreatedPacks")
   subscription Subscription?
+  invitations  Invitation[]
+  auditLogs    AuditLog[]
 
   @@map("organizations")
 }
@@ -40,7 +42,9 @@ model User {
   email          String    @unique
   name           String?
   image          String?
-  role           UserRole  @default(VIEWER)
+  role           UserRole  @default(VIEWER)  // Legacy role field
+  newRole        Role      @default(VIEWER)  // New RBAC role
+  isSuperAdmin   Boolean   @default(false)   // Platform-level access
   emailVerified  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -53,6 +57,18 @@ model User {
   accounts Account[]
   sessions Session[]
 
+  // Cluster-scoped permissions
+  clusterAssignments ClusterAssignment[]
+
+  // Invitations sent by this user
+  invitationsSent Invitation[] @relation("InvitedBy")
+
+  // API tokens created by this user
+  tokensCreated ApiToken[] @relation("TokenCreator")
+
+  // Audit logs for this user
+  auditLogs AuditLog[] @relation("AuditUser")
+
   // Activity tracking
   policiesCreated      Policy[]     @relation("PolicyCreator")
   simulationsRun       Simulation[] @relation("SimulationRunner")
@@ -64,10 +80,30 @@ model User {
   @@map("users")
 }
 
+// Legacy role enum - kept for migration compatibility
+// New system uses Role enum + isSuperAdmin boolean
 enum UserRole {
-  ADMIN    // Full access, can manage users and clusters
-  OPERATOR // Can create/edit policies, run simulations
-  VIEWER   // Read-only access to dashboards
+  ADMIN    // Maps to ORG_ADMIN
+  OPERATOR // Maps to POLICY_EDITOR
+  VIEWER   // Maps to VIEWER
+}
+
+// New RBAC role enum for granular permissions
+enum Role {
+  ORG_ADMIN       // Manages their organization
+  CLUSTER_ADMIN   // Manages assigned clusters (requires ClusterAssignment)
+  POLICY_EDITOR   // Edits policies on assigned clusters (requires ClusterAssignment)
+  VIEWER          // Read-only access
+}
+
+enum TokenType {
+  AGENT  // kph_at_ - for operators connecting clusters
+  API    // kph_api_ - for automation/CI-CD
+}
+
+enum TokenStatus {
+  ACTIVE
+  REVOKED
 }
 
 // NextAuth.js required models
@@ -108,6 +144,52 @@ model VerificationToken {
 
   @@unique([identifier, token])
   @@map("verification_tokens")
+}
+
+// ============================================================================
+// RBAC: CLUSTER ASSIGNMENTS & INVITATIONS
+// ============================================================================
+
+// Cluster-scoped role assignments (e.g., "Bob is ClusterAdmin for cluster X only")
+model ClusterAssignment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clusterId String
+  cluster   Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  role      Role     // CLUSTER_ADMIN, POLICY_EDITOR, or VIEWER
+  createdAt DateTime @default(now())
+
+  @@unique([userId, clusterId])
+  @@index([clusterId])
+  @@map("cluster_assignments")
+}
+
+// User invitations (stored in our DB, Clerk handles auth)
+model Invitation {
+  id             String    @id @default(cuid())
+  email          String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role      @default(VIEWER)
+  invitedById    String
+  invitedBy      User      @relation("InvitedBy", fields: [invitedById], references: [id])
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([email])
+  @@index([organizationId])
+  @@map("invitations")
+}
+
+// System-wide configuration (managed by SuperAdmins)
+model SystemConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
 }
 
 // ============================================================================
@@ -165,6 +247,8 @@ model Cluster {
   packDeployments              PolicyPackDeployment[]
   processValidationSummaries   ProcessValidationSummary[]
   processValidationEvents      ProcessValidationEvent[]
+  clusterAssignments           ClusterAssignment[]
+  auditLogs                    AuditLog[]
 
   @@unique([organizationId, name])
   @@map("clusters")
@@ -789,21 +873,30 @@ enum SimulationStatus {
 model AuditLog {
   id        String   @id @default(cuid())
   timestamp DateTime @default(now())
-  
-  action    String   // e.g., "policy.created", "cluster.connected"
-  resource  String   // e.g., "Policy", "Cluster"
-  resourceId String?
-  
-  userId    String?
-  userEmail String?
-  
-  details   Json?    // Additional context
-  ipAddress String?
 
-  organizationId String
+  action       String    // e.g., "user.login", "policy.created", "cluster.connected"
+  resource     String?   // Legacy field (kept for compatibility)
+  resourceType String?   // e.g., "Policy", "Cluster", "User"
+  resourceId   String?
+
+  userId    String?
+  user      User?    @relation("AuditUser", fields: [userId], references: [id])
+  userEmail String?
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  clusterId String?
+  cluster   Cluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  details   Json?     // Additional context
+  ipAddress String?
+  userAgent String?
 
   @@index([organizationId, timestamp])
-  @@index([resource, resourceId])
+  @@index([userId, timestamp])
+  @@index([action, timestamp])
+  @@index([clusterId])
   @@map("audit_logs")
 }
 
@@ -812,16 +905,18 @@ model AuditLog {
 // ============================================================================
 
 model ApiToken {
-  id          String    @id @default(cuid())
+  id          String      @id @default(cuid())
   name        String
-  tokenHash   String    @unique  // SHA-256 hash of the actual token
-  prefix      String              // First 8 chars for identification (e.g., "phub_xxx")
-  scopes      String[]            // ["cluster:read", "cluster:write", "policy:read", "flow:write"]
+  type        TokenType   @default(AGENT)
+  tokenHash   String      @unique  // SHA-256 hash of the actual token
+  prefix      String               // First 8 chars for identification (e.g., "kph_at_xxx")
+  scopes      String[]             // ["cluster:read", "cluster:write", "policy:read", "flow:write"]
 
+  status      TokenStatus @default(ACTIVE)
   expiresAt   DateTime?
   lastUsedAt  DateTime?
   revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime    @default(now())
 
   // Links to cluster for cluster-scoped tokens
   clusterId      String?
@@ -831,8 +926,13 @@ model ApiToken {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // Creator tracking
+  createdById    String?
+  createdBy      User?     @relation("TokenCreator", fields: [createdById], references: [id])
+
   @@index([tokenHash])
   @@index([clusterId])
+  @@index([status])
   @@map("api_tokens")
 }
 
