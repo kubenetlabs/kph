@@ -9,6 +9,7 @@ import Modal from "~/components/ui/modal";
 import PolicyForm from "~/components/policies/policy-form";
 import { Spinner } from "~/components/ui/spinner";
 import { Pagination } from "~/components/ui/pagination";
+import { QueryErrorState } from "~/components/ui/error-state";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -65,7 +66,7 @@ export default function PoliciesPage() {
   const currentCursor = cursors[page - 1];
 
   // Fetch policies with filters and pagination
-  const { data, isLoading, error } = trpc.policy.list.useQuery({
+  const { data, isLoading, error, refetch } = trpc.policy.list.useQuery({
     ...(filterType && { type: filterType }),
     ...(filterStatus && { status: filterStatus }),
     ...(searchQuery && { search: searchQuery }),
@@ -256,11 +257,9 @@ export default function PoliciesPage() {
 
       {/* Error State */}
       {error && (
-        <div className="rounded-md border border-danger/30 bg-danger/10 p-4">
-          <p className="text-sm text-danger">
-            Failed to load policies: {error.message}
-          </p>
-        </div>
+        <Card>
+          <QueryErrorState error={error} refetch={() => refetch()} />
+        </Card>
       )}
 
       {/* Empty State */}

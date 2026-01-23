@@ -10,6 +10,7 @@ import Modal from "~/components/ui/modal";
 import CreateClusterForm from "~/components/clusters/create-cluster-form";
 import RegistrationTokens from "~/components/clusters/registration-tokens";
 import { Spinner } from "~/components/ui/spinner";
+import { QueryErrorState } from "~/components/ui/error-state";
 import { trpc } from "~/lib/trpc";
 
 type TabType = "clusters" | "tokens";
@@ -58,7 +59,7 @@ export default function ClustersPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Fetch clusters from database
-  const { data: clusters = [], isLoading, refetch } = trpc.cluster.list.useQuery();
+  const { data: clusters = [], isLoading, isError, error, refetch } = trpc.cluster.list.useQuery();
 
   // Filter clusters based on selected filters and search
   const filteredClusters = clusters.filter((cluster) => {
@@ -222,8 +223,15 @@ export default function ClustersPage() {
         </Card>
       )}
 
+      {/* Error State */}
+      {!isLoading && isError && (
+        <Card>
+          <QueryErrorState error={error} refetch={() => refetch()} />
+        </Card>
+      )}
+
       {/* Clusters Table */}
-      {!isLoading && filteredClusters.length > 0 && (
+      {!isLoading && !isError && filteredClusters.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <table className="w-full">
@@ -337,7 +345,7 @@ export default function ClustersPage() {
       )}
 
           {/* Empty State - No clusters at all */}
-          {!isLoading && clusters.length === 0 && (
+          {!isLoading && !isError && clusters.length === 0 && (
             <Card className="py-12 text-center">
               <div className="mx-auto h-12 w-12 rounded-full bg-card-hover p-3 text-muted">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
