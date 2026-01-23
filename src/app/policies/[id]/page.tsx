@@ -878,9 +878,9 @@ export default function PolicyDetailPage() {
               onChange={(e) => setSimulationDays(Number(e.target.value))}
               className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              <option value={1}>Last 24 hours</option>
-              <option value={3}>Last 3 days</option>
-              <option value={7}>Last 7 days</option>
+              <option value={1} className="bg-card text-foreground">Last 24 hours</option>
+              <option value={3} className="bg-card text-foreground">Last 3 days</option>
+              <option value={7} className="bg-card text-foreground">Last 7 days</option>
             </select>
           </div>
           <div className="rounded-md bg-accent/10 p-3">

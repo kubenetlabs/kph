@@ -170,9 +170,9 @@ export default function DeploymentsPage() {
             onChange={(e) => setFilterStatus(e.target.value as DeploymentStatus | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            <option value="">All Statuses</option>
+            <option value="" className="bg-card text-foreground">All Statuses</option>
             {Object.entries(statusConfig).map(([value, { label }]) => (
-              <option key={value} value={value}>
+              <option key={value} value={value} className="bg-card text-foreground">
                 {label}
               </option>
             ))}
@@ -182,9 +182,9 @@ export default function DeploymentsPage() {
             onChange={(e) => setSelectedClusterId(e.target.value)}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            <option value="">All Clusters</option>
+            <option value="" className="bg-card text-foreground">All Clusters</option>
             {clusters?.map((cluster) => (
-              <option key={cluster.id} value={cluster.id}>
+              <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                 {cluster.name}
               </option>
             ))}

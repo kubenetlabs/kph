@@ -107,10 +107,10 @@ export default function TeamSettingsPage() {
                     onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
                     className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
-                    <option value="VIEWER">Viewer - Read-only access</option>
-                    <option value="POLICY_EDITOR">Policy Editor - Can create and edit policies</option>
-                    <option value="CLUSTER_ADMIN">Cluster Admin - Can manage clusters</option>
-                    <option value="ORG_ADMIN">Organization Admin - Full access</option>
+                    <option value="VIEWER" className="bg-card text-foreground">Viewer - Read-only access</option>
+                    <option value="POLICY_EDITOR" className="bg-card text-foreground">Policy Editor - Can create and edit policies</option>
+                    <option value="CLUSTER_ADMIN" className="bg-card text-foreground">Cluster Admin - Can manage clusters</option>
+                    <option value="ORG_ADMIN" className="bg-card text-foreground">Organization Admin - Full access</option>
                   </select>
                 </div>
                 {createInvitation.error && (

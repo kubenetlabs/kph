@@ -59,9 +59,9 @@ export default function AdminUsersPage() {
               onChange={(e) => setSelectedOrg(e.target.value || undefined)}
               className="rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="">All Organizations</option>
+              <option value="" className="bg-card text-foreground">All Organizations</option>
               {organizations.map((org) => (
-                <option key={org.id} value={org.id}>
+                <option key={org.id} value={org.id} className="bg-card text-foreground">
                   {org.name}
                 </option>
               ))}

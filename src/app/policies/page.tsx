@@ -215,9 +215,9 @@ export default function PoliciesPage() {
             onChange={(e) => handleFilterChange(setFilterType, e.target.value as PolicyType | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            <option value="">All Types</option>
+            <option value="" className="bg-card text-foreground">All Types</option>
             {Object.entries(typeConfig).map(([value, { label }]) => (
-              <option key={value} value={value}>
+              <option key={value} value={value} className="bg-card text-foreground">
                 {label}
               </option>
             ))}
@@ -227,9 +227,9 @@ export default function PoliciesPage() {
             onChange={(e) => handleFilterChange(setFilterStatus, e.target.value as PolicyStatus | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            <option value="">All Statuses</option>
+            <option value="" className="bg-card text-foreground">All Statuses</option>
             {Object.entries(statusConfig).map(([value, { label }]) => (
-              <option key={value} value={value}>
+              <option key={value} value={value} className="bg-card text-foreground">
                 {label}
               </option>
             ))}

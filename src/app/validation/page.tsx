@@ -872,11 +872,11 @@ export default function ValidationDashboardPage() {
             onChange={(e) => setTimeRange(Number(e.target.value))}
             className="rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
           >
-            <option value={1}>Last hour</option>
-            <option value={6}>Last 6 hours</option>
-            <option value={24}>Last 24 hours</option>
-            <option value={72}>Last 3 days</option>
-            <option value={168}>Last 7 days</option>
+            <option value={1} className="bg-card text-foreground">Last hour</option>
+            <option value={6} className="bg-card text-foreground">Last 6 hours</option>
+            <option value={24} className="bg-card text-foreground">Last 24 hours</option>
+            <option value={72} className="bg-card text-foreground">Last 3 days</option>
+            <option value={168} className="bg-card text-foreground">Last 7 days</option>
           </select>
 
           {/* Cluster selector */}
@@ -886,10 +886,10 @@ export default function ValidationDashboardPage() {
             className="rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground min-w-[200px]"
           >
             {clusterList.length === 0 ? (
-              <option value="">No clusters</option>
+              <option value="" className="bg-card text-foreground">No clusters</option>
             ) : (
               clusterList.map((cluster) => (
-                <option key={cluster.id} value={cluster.id}>
+                <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                   {cluster.name}
                 </option>
               ))

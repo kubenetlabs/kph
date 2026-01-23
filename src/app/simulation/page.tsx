@@ -204,9 +204,9 @@ export default function SimulationPage() {
                 onChange={(e) => setFilterClusterId(e.target.value)}
                 className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[160px]"
               >
-                <option value="">All Clusters</option>
+                <option value="" className="bg-card text-foreground">All Clusters</option>
                 {clusters.map((cluster) => (
-                  <option key={cluster.id} value={cluster.id}>
+                  <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                     {cluster.name}
                   </option>
                 ))}
@@ -221,7 +221,7 @@ export default function SimulationPage() {
                 className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[140px]"
               >
                 {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
+                  <option key={option.value} value={option.value} className="bg-card text-foreground">
                     {option.label}
                   </option>
                 ))}
@@ -235,9 +235,9 @@ export default function SimulationPage() {
                 onChange={(e) => setFilterPolicyId(e.target.value)}
                 className="rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-foreground min-w-[180px]"
               >
-                <option value="">All Policies</option>
+                <option value="" className="bg-card text-foreground">All Policies</option>
                 {policies.map((policy) => (
-                  <option key={policy.id} value={policy.id}>
+                  <option key={policy.id} value={policy.id} className="bg-card text-foreground">
                     {policy.name}
                   </option>
                 ))}
@@ -423,9 +423,9 @@ export default function SimulationPage() {
               onChange={(e) => setSelectedPolicyId(e.target.value)}
               className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              <option value="">Choose a policy...</option>
+              <option value="" className="bg-card text-foreground">Choose a policy...</option>
               {policies.map((policy) => (
-                <option key={policy.id} value={policy.id}>
+                <option key={policy.id} value={policy.id} className="bg-card text-foreground">
                   {policy.name}
                 </option>
               ))}
@@ -441,9 +441,9 @@ export default function SimulationPage() {
               onChange={(e) => setSelectedClusterId(e.target.value)}
               className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              <option value="">Choose a cluster...</option>
+              <option value="" className="bg-card text-foreground">Choose a cluster...</option>
               {clusters.map((cluster) => (
-                <option key={cluster.id} value={cluster.id}>
+                <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                   {cluster.name}
                 </option>
               ))}
@@ -459,9 +459,9 @@ export default function SimulationPage() {
               onChange={(e) => setSimulationDays(Number(e.target.value))}
               className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              <option value={1}>Last 24 hours</option>
-              <option value={3}>Last 3 days</option>
-              <option value={7}>Last 7 days</option>
+              <option value={1} className="bg-card text-foreground">Last 24 hours</option>
+              <option value={3} className="bg-card text-foreground">Last 3 days</option>
+              <option value={7} className="bg-card text-foreground">Last 7 days</option>
             </select>
           </div>
 

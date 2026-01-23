@@ -110,9 +110,9 @@ export default function TemplatesPage() {
             onChange={(e) => setFilterType(e.target.value as PolicyType | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
-            <option value="">All Types</option>
+            <option value="" className="bg-card text-foreground">All Types</option>
             {Object.entries(typeConfig).map(([value, { label }]) => (
-              <option key={value} value={value}>
+              <option key={value} value={value} className="bg-card text-foreground">
                 {label}
               </option>
             ))}

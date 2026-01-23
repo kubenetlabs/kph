@@ -344,10 +344,10 @@ export default function GatewayAPIStatusPage() {
             className="rounded-md border border-card-border bg-background px-3 py-2 text-sm text-foreground min-w-[200px]"
           >
             {clusterList.length === 0 ? (
-              <option value="">No clusters</option>
+              <option value="" className="bg-card text-foreground">No clusters</option>
             ) : (
               clusterList.map((cluster) => (
-                <option key={cluster.id} value={cluster.id}>
+                <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                   {cluster.name}
                 </option>
               ))

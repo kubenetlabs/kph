@@ -119,9 +119,9 @@ export default function InviteUserPage() {
                 onChange={(e) => setOrganizationId(e.target.value)}
                 className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="">Select an organization...</option>
+                <option value="" className="bg-card text-foreground">Select an organization...</option>
                 {organizations.map((org) => (
-                  <option key={org.id} value={org.id}>
+                  <option key={org.id} value={org.id} className="bg-card text-foreground">
                     {org.name} ({org.slug})
                   </option>
                 ))}
@@ -144,10 +144,10 @@ export default function InviteUserPage() {
                 onChange={(e) => setRole(e.target.value as typeof role)}
                 className="w-full rounded-md border border-card-border bg-background px-3 py-2 text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="VIEWER">Viewer</option>
-                <option value="POLICY_EDITOR">Policy Editor</option>
-                <option value="CLUSTER_ADMIN">Cluster Admin</option>
-                <option value="ORG_ADMIN">Organization Admin</option>
+                <option value="VIEWER" className="bg-card text-foreground">Viewer</option>
+                <option value="POLICY_EDITOR" className="bg-card text-foreground">Policy Editor</option>
+                <option value="CLUSTER_ADMIN" className="bg-card text-foreground">Cluster Admin</option>
+                <option value="ORG_ADMIN" className="bg-card text-foreground">Organization Admin</option>
               </select>
               <p className="mt-1 text-xs text-muted">
                 {roleDescriptions[role]}

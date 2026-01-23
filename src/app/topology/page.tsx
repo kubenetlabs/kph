@@ -102,10 +102,10 @@ export default function TopologyPage() {
               className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground min-w-[200px]"
             >
               {clusterList.length === 0 ? (
-                <option value="">No clusters</option>
+                <option value="" className="bg-card text-foreground">No clusters</option>
               ) : (
                 clusterList.map((cluster) => (
-                  <option key={cluster.id} value={cluster.id}>
+                  <option key={cluster.id} value={cluster.id} className="bg-card text-foreground">
                     {cluster.name}
                   </option>
                 ))
@@ -124,10 +124,10 @@ export default function TopologyPage() {
               onChange={(e) => setFilters({ verdict: e.target.value as typeof filters.verdict })}
               className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
             >
-              <option value="all">All</option>
-              <option value="allowed">Allowed</option>
-              <option value="denied">Denied</option>
-              <option value="no-policy">No Policy</option>
+              <option value="all" className="bg-card text-foreground">All</option>
+              <option value="allowed" className="bg-card text-foreground">Allowed</option>
+              <option value="denied" className="bg-card text-foreground">Denied</option>
+              <option value="no-policy" className="bg-card text-foreground">No Policy</option>
             </select>
           </div>
 
@@ -139,10 +139,10 @@ export default function TopologyPage() {
               onChange={(e) => setFilters({ timeRange: e.target.value as typeof filters.timeRange })}
               className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
             >
-              <option value="5m">5 min</option>
-              <option value="15m">15 min</option>
-              <option value="1h">1 hour</option>
-              <option value="24h">24 hours</option>
+              <option value="5m" className="bg-card text-foreground">5 min</option>
+              <option value="15m" className="bg-card text-foreground">15 min</option>
+              <option value="1h" className="bg-card text-foreground">1 hour</option>
+              <option value="24h" className="bg-card text-foreground">24 hours</option>
             </select>
           </div>
 
@@ -159,9 +159,9 @@ export default function TopologyPage() {
               className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
               disabled={namespacesLoading}
             >
-              <option value="">{namespacesLoading ? "Loading..." : "All namespaces"}</option>
+              <option value="" className="bg-card text-foreground">{namespacesLoading ? "Loading..." : "All namespaces"}</option>
               {namespaces.map((ns) => (
-                <option key={ns} value={ns}>
+                <option key={ns} value={ns} className="bg-card text-foreground">
                   {ns}
                 </option>
               ))}

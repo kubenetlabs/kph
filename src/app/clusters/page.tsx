@@ -171,35 +171,35 @@ export default function ClustersPage() {
                 onChange={(e) => setFilterProvider(e.target.value as Provider | "")}
                 className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="">All Providers</option>
-                <option value="AWS">AWS</option>
-                <option value="GCP">GCP</option>
-                <option value="AZURE">Azure</option>
-                <option value="ON_PREM">On-Prem</option>
-                <option value="OTHER">Other</option>
+                <option value="" className="bg-card text-foreground">All Providers</option>
+                <option value="AWS" className="bg-card text-foreground">AWS</option>
+                <option value="GCP" className="bg-card text-foreground">GCP</option>
+                <option value="AZURE" className="bg-card text-foreground">Azure</option>
+                <option value="ON_PREM" className="bg-card text-foreground">On-Prem</option>
+                <option value="OTHER" className="bg-card text-foreground">Other</option>
               </select>
               <select
                 value={filterEnvironment}
                 onChange={(e) => setFilterEnvironment(e.target.value as Environment | "")}
                 className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="">All Environments</option>
-                <option value="PRODUCTION">Production</option>
-                <option value="STAGING">Staging</option>
-                <option value="DEVELOPMENT">Development</option>
-                <option value="TESTING">Testing</option>
+                <option value="" className="bg-card text-foreground">All Environments</option>
+                <option value="PRODUCTION" className="bg-card text-foreground">Production</option>
+                <option value="STAGING" className="bg-card text-foreground">Staging</option>
+                <option value="DEVELOPMENT" className="bg-card text-foreground">Development</option>
+                <option value="TESTING" className="bg-card text-foreground">Testing</option>
               </select>
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value as Status | "")}
                 className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="">All Statuses</option>
-                <option value="CONNECTED">Connected</option>
-                <option value="PENDING">Pending</option>
-                <option value="DEGRADED">Degraded</option>
-                <option value="DISCONNECTED">Disconnected</option>
-                <option value="ERROR">Error</option>
+                <option value="" className="bg-card text-foreground">All Statuses</option>
+                <option value="CONNECTED" className="bg-card text-foreground">Connected</option>
+                <option value="PENDING" className="bg-card text-foreground">Pending</option>
+                <option value="DEGRADED" className="bg-card text-foreground">Degraded</option>
+                <option value="DISCONNECTED" className="bg-card text-foreground">Disconnected</option>
+                <option value="ERROR" className="bg-card text-foreground">Error</option>
               </select>
             </div>
             <div className="flex-1" />
