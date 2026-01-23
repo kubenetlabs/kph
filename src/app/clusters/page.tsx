@@ -41,14 +41,39 @@ interface ClusterFormData {
   caCert?: string;
 }
 
+type Provider = "AWS" | "GCP" | "AZURE" | "ON_PREM" | "OTHER";
+type Environment = "PRODUCTION" | "STAGING" | "DEVELOPMENT" | "TESTING";
+type Status = "CONNECTED" | "PENDING" | "DEGRADED" | "DISCONNECTED" | "ERROR";
+
 export default function ClustersPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>("clusters");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Filter state
+  const [filterProvider, setFilterProvider] = useState<Provider | "">("");
+  const [filterEnvironment, setFilterEnvironment] = useState<Environment | "">("");
+  const [filterStatus, setFilterStatus] = useState<Status | "">("");
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Fetch clusters from database
   const { data: clusters = [], isLoading, refetch } = trpc.cluster.list.useQuery();
+
+  // Filter clusters based on selected filters and search
+  const filteredClusters = clusters.filter((cluster) => {
+    if (filterProvider && cluster.provider !== filterProvider) return false;
+    if (filterEnvironment && cluster.environment !== filterEnvironment) return false;
+    if (filterStatus && cluster.status !== filterStatus) return false;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesName = cluster.name.toLowerCase().includes(query);
+      const matchesDescription = cluster.description?.toLowerCase().includes(query);
+      const matchesRegion = cluster.region.toLowerCase().includes(query);
+      if (!matchesName && !matchesDescription && !matchesRegion) return false;
+    }
+    return true;
+  });
 
   // Create cluster mutation
   const createClusterMutation = trpc.cluster.create.useMutation({
@@ -140,16 +165,52 @@ export default function ClustersPage() {
           {/* Filters */}
           <div className="mb-6 flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted">Filter by:</span>
-              <Button variant="ghost" size="sm">
-                All Providers
-              </Button>
-              <Button variant="ghost" size="sm">
-                All Environments
-              </Button>
-              <Button variant="ghost" size="sm">
-                All Statuses
-              </Button>
+              <span className="text-sm text-muted">Filter:</span>
+              <select
+                value={filterProvider}
+                onChange={(e) => setFilterProvider(e.target.value as Provider | "")}
+                className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">All Providers</option>
+                <option value="AWS">AWS</option>
+                <option value="GCP">GCP</option>
+                <option value="AZURE">Azure</option>
+                <option value="ON_PREM">On-Prem</option>
+                <option value="OTHER">Other</option>
+              </select>
+              <select
+                value={filterEnvironment}
+                onChange={(e) => setFilterEnvironment(e.target.value as Environment | "")}
+                className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">All Environments</option>
+                <option value="PRODUCTION">Production</option>
+                <option value="STAGING">Staging</option>
+                <option value="DEVELOPMENT">Development</option>
+                <option value="TESTING">Testing</option>
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as Status | "")}
+                className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">All Statuses</option>
+                <option value="CONNECTED">Connected</option>
+                <option value="PENDING">Pending</option>
+                <option value="DEGRADED">Degraded</option>
+                <option value="DISCONNECTED">Disconnected</option>
+                <option value="ERROR">Error</option>
+              </select>
+            </div>
+            <div className="flex-1" />
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search clusters..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-64 rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              />
             </div>
           </div>
 
@@ -162,7 +223,7 @@ export default function ClustersPage() {
       )}
 
       {/* Clusters Table */}
-      {!isLoading && clusters.length > 0 && (
+      {!isLoading && filteredClusters.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <table className="w-full">
@@ -192,7 +253,7 @@ export default function ClustersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
-                {clusters.map((cluster) => {
+                {filteredClusters.map((cluster) => {
                   const status = statusConfig[cluster.status as keyof typeof statusConfig];
                   const env = environmentConfig[cluster.environment as keyof typeof environmentConfig];
                   
@@ -275,7 +336,7 @@ export default function ClustersPage() {
         </Card>
       )}
 
-          {/* Empty State */}
+          {/* Empty State - No clusters at all */}
           {!isLoading && clusters.length === 0 && (
             <Card className="py-12 text-center">
               <div className="mx-auto h-12 w-12 rounded-full bg-card-hover p-3 text-muted">
@@ -292,6 +353,33 @@ export default function ClustersPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
                 Add Your First Cluster
+              </Button>
+            </Card>
+          )}
+
+          {/* Empty State - No matches for filters */}
+          {!isLoading && clusters.length > 0 && filteredClusters.length === 0 && (
+            <Card className="py-12 text-center">
+              <div className="mx-auto h-12 w-12 rounded-full bg-card-hover p-3 text-muted">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <h3 className="mt-4 text-lg font-medium text-foreground">No clusters found</h3>
+              <p className="mt-2 text-sm text-muted">
+                Try adjusting your filters or search query.
+              </p>
+              <Button
+                variant="secondary"
+                className="mt-6"
+                onClick={() => {
+                  setFilterProvider("");
+                  setFilterEnvironment("");
+                  setFilterStatus("");
+                  setSearchQuery("");
+                }}
+              >
+                Clear Filters
               </Button>
             </Card>
           )}

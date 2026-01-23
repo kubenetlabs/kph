@@ -7,6 +7,7 @@ import {
   unauthorized,
 } from "~/lib/api-auth";
 import { generateApiToken } from "~/lib/encryption";
+import { rateLimiters } from "~/lib/rate-limit";
 
 const bootstrapRequestSchema = z.object({
   // Cluster identification
@@ -49,6 +50,28 @@ export async function POST(request: NextRequest) {
   );
   if (!auth) {
     return unauthorized("Invalid or missing registration token");
+  }
+
+  // Rate limit: 5 requests per minute per organization
+  // Prevents brute-force cluster name registration attempts
+  const rateLimitResult = rateLimiters.bootstrap.check(`org:${auth.organizationId}`);
+  if (!rateLimitResult.allowed) {
+    const retryAfterSeconds = Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000);
+    return NextResponse.json(
+      {
+        error: "Too many requests",
+        message: "Rate limit exceeded for cluster registration. Please try again later.",
+        retryAfter: retryAfterSeconds,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(retryAfterSeconds),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(rateLimitResult.resetAt),
+        },
+      }
+    );
   }
 
   try {

@@ -9,6 +9,7 @@ import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import PolicyForm from "~/components/policies/policy-form";
 import { Spinner } from "~/components/ui/spinner";
+import { Breadcrumb } from "~/components/ui/breadcrumb";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -291,17 +292,15 @@ export default function PolicyDetailPage() {
 
   return (
     <AppShell>
+      <Breadcrumb
+        items={[
+          { label: "Policies", href: "/policies" },
+          { label: policy.name },
+        ]}
+      />
+
       {/* Header */}
       <div className="mb-8">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/policies")}
-          className="mb-4"
-        >
-          ← Back to Policies
-        </Button>
-
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3">

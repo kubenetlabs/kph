@@ -9,6 +9,7 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import { Spinner } from "~/components/ui/spinner";
+import { Breadcrumb } from "~/components/ui/breadcrumb";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -140,14 +141,17 @@ export default function TemplateDetailPage() {
 
   return (
     <AppShell>
+      <Breadcrumb
+        items={[
+          { label: "Templates", href: "/templates" },
+          { label: template.name },
+        ]}
+      />
+
       {/* Header */}
       <div className="mb-8 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <Link href="/templates" className="text-muted hover:text-foreground">
-              Templates
-            </Link>
-            <span className="text-muted">/</span>
             <h1 className="text-2xl font-bold text-foreground">{template.name}</h1>
             <Badge variant="muted">v{template.currentVersion}</Badge>
           </div>

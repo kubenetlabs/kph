@@ -9,6 +9,7 @@ import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import EditClusterForm, { type EditClusterFormData } from "~/components/clusters/edit-cluster-form";
 import { Spinner } from "~/components/ui/spinner";
+import { Breadcrumb } from "~/components/ui/breadcrumb";
 import { trpc } from "~/lib/trpc";
 
 const statusConfig = {
@@ -108,6 +109,13 @@ export default function ClusterDetailPage() {
 
   return (
     <AppShell>
+      <Breadcrumb
+        items={[
+          { label: "Clusters", href: "/clusters" },
+          { label: cluster.name },
+        ]}
+      />
+
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">

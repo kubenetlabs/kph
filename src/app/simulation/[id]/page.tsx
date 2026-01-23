@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import { Spinner } from "~/components/ui/spinner";
+import { Breadcrumb } from "~/components/ui/breadcrumb";
 import { trpc } from "~/lib/trpc";
 
 type SimulationStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
@@ -646,17 +647,15 @@ export default function SimulationDetailPage() {
 
   return (
     <AppShell>
+      <Breadcrumb
+        items={[
+          { label: "Simulations", href: "/simulation" },
+          { label: simulation.name },
+        ]}
+      />
+
       {/* Header */}
       <div className="mb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/simulation")}
-          className="mb-4"
-        >
-          ← Back to Simulations
-        </Button>
-
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3">

@@ -10,6 +10,7 @@ import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import Select from "~/components/ui/select";
 import { Spinner } from "~/components/ui/spinner";
+import { Breadcrumb } from "~/components/ui/breadcrumb";
 import { trpc } from "~/lib/trpc";
 
 // Icons as inline SVGs
@@ -57,14 +58,6 @@ function CrownIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="currentColor" viewBox="0 0 24 24">
       <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z" />
-    </svg>
-  );
-}
-
-function ArrowLeftIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
     </svg>
   );
 }
@@ -187,14 +180,16 @@ export default function PackDetailsPage() {
 
   return (
     <AppShell>
+      <Breadcrumb
+        items={[
+          { label: "Marketplace", href: "/marketplace" },
+          { label: pack.name },
+        ]}
+      />
+
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center gap-4">
-          <Link href="/marketplace">
-            <Button variant="ghost" size="sm">
-              <ArrowLeftIcon className="h-4 w-4" />
-            </Button>
-          </Link>
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent/10">
