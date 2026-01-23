@@ -40,6 +40,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
               : "border-card-border focus:border-primary focus:ring-primary",
             className
           )}
+          style={{ colorScheme: 'dark' }}
           {...props}
         >
           {placeholder && (

@@ -21,6 +21,12 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  /* Force dark mode styling for native form controls (select dropdowns) */
+  select,
+  select option {
+    color-scheme: dark;
+  }
+
   /* Custom scrollbar for dark theme */
   ::-webkit-scrollbar {
     width: 8px;
