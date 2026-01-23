@@ -11,6 +11,7 @@ import CreateClusterForm from "~/components/clusters/create-cluster-form";
 import RegistrationTokens from "~/components/clusters/registration-tokens";
 import { Spinner } from "~/components/ui/spinner";
 import { QueryErrorState } from "~/components/ui/error-state";
+import { SortableHeader, useSortState, sortData } from "~/components/ui/sortable-header";
 import { trpc } from "~/lib/trpc";
 
 type TabType = "clusters" | "tokens";
@@ -58,23 +59,38 @@ export default function ClustersPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "">("");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Sort state for clusters table
+  type ClusterSortColumn = "name" | "provider" | "environment" | "status" | "nodes";
+  const { sortState, handleSort } = useSortState<ClusterSortColumn>("name");
+
   // Fetch clusters from database
   const { data: clusters = [], isLoading, isError, error, refetch } = trpc.cluster.list.useQuery();
 
-  // Filter clusters based on selected filters and search
-  const filteredClusters = clusters.filter((cluster) => {
-    if (filterProvider && cluster.provider !== filterProvider) return false;
-    if (filterEnvironment && cluster.environment !== filterEnvironment) return false;
-    if (filterStatus && cluster.status !== filterStatus) return false;
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const matchesName = cluster.name.toLowerCase().includes(query);
-      const matchesDescription = cluster.description?.toLowerCase().includes(query);
-      const matchesRegion = cluster.region.toLowerCase().includes(query);
-      if (!matchesName && !matchesDescription && !matchesRegion) return false;
-    }
-    return true;
-  });
+  // Filter and sort clusters
+  const filteredClusters = (() => {
+    const result = clusters.filter((cluster) => {
+      if (filterProvider && cluster.provider !== filterProvider) return false;
+      if (filterEnvironment && cluster.environment !== filterEnvironment) return false;
+      if (filterStatus && cluster.status !== filterStatus) return false;
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesName = cluster.name.toLowerCase().includes(query);
+        const matchesDescription = cluster.description?.toLowerCase().includes(query);
+        const matchesRegion = cluster.region.toLowerCase().includes(query);
+        if (!matchesName && !matchesDescription && !matchesRegion) return false;
+      }
+      return true;
+    });
+
+    // Apply sorting
+    return sortData(result, sortState, {
+      name: (c) => c.name,
+      provider: (c) => c.provider,
+      environment: (c) => c.environment,
+      status: (c) => c.status,
+      nodes: (c) => c.nodeCount,
+    });
+  })();
 
   // Create cluster mutation
   const createClusterMutation = trpc.cluster.create.useMutation({
@@ -237,20 +253,45 @@ export default function ClustersPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-card-border">
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
-                    Cluster
+                  <th className="px-4 py-3 text-left">
+                    <SortableHeader
+                      column="name"
+                      label="Cluster"
+                      currentSort={sortState}
+                      onSort={handleSort}
+                    />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
-                    Provider / Region
+                  <th className="px-4 py-3 text-left">
+                    <SortableHeader
+                      column="provider"
+                      label="Provider / Region"
+                      currentSort={sortState}
+                      onSort={handleSort}
+                    />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
-                    Environment
+                  <th className="px-4 py-3 text-left">
+                    <SortableHeader
+                      column="environment"
+                      label="Environment"
+                      currentSort={sortState}
+                      onSort={handleSort}
+                    />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
-                    Status
+                  <th className="px-4 py-3 text-left">
+                    <SortableHeader
+                      column="status"
+                      label="Status"
+                      currentSort={sortState}
+                      onSort={handleSort}
+                    />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
-                    Nodes
+                  <th className="px-4 py-3 text-left">
+                    <SortableHeader
+                      column="nodes"
+                      label="Nodes"
+                      currentSort={sortState}
+                      onSort={handleSort}
+                    />
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted">
                     Operator
