@@ -1,0 +1,33 @@
+apiVersion: policyhub.io/v1alpha1
+kind: PolicyHubConfig
+metadata:
+  name: default
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kph-agent
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  saasEndpoint: {{ .Values.agent.serverUrl | quote }}
+  clusterIdSecretRef:
+    name: kph-agent-config
+    key: cluster-id
+  apiTokenSecretRef:
+    name: {{ .Values.agent.existingSecret | default "kph-agent-token" }}
+    key: api-token
+  syncInterval: {{ printf "%ds" (int .Values.agent.syncInterval) | quote }}
+  heartbeatInterval: {{ printf "%ds" (int .Values.agent.heartbeatInterval) | quote }}
+  {{- if .Values.cluster.provider }}
+  provider: {{ .Values.cluster.provider | quote }}
+  {{- end }}
+  {{- if .Values.cluster.region }}
+  region: {{ .Values.cluster.region | quote }}
+  {{- end }}
+  {{- if .Values.cluster.environment }}
+  environment: {{ .Values.cluster.environment | quote }}
+  {{- end }}
+  {{- if .Values.telemetry.hubble.enabled }}
+  flowCollection:
+    enabled: true
+    hubbleAddress: {{ .Values.telemetry.hubble.address | quote }}
+  {{- end }}

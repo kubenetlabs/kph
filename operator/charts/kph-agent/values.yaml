@@ -1,6 +1,23 @@
 # KPH Agent Configuration
 # See https://github.com/henleda/kubernetes-policy-hub for documentation
 
+# Global image configuration
+# Override these to use your own registry (Docker Hub, GCR, ACR, etc.)
+global:
+  image:
+    # Registry URL (e.g., docker.io, gcr.io, <account>.azurecr.io, <account>.dkr.ecr.<region>.amazonaws.com)
+    registry: "docker.io"
+    # Repository path (without registry prefix)
+    repository: "policyhub/kph-agent"
+    # Image tag
+    tag: "latest"
+    # Pull policy: Always, IfNotPresent, Never
+    pullPolicy: "IfNotPresent"
+
+  # Image pull secrets for private registries
+  # Example: imagePullSecrets: [{name: "my-registry-secret"}]
+  imagePullSecrets: []
+
 # Agent configuration (required)
 agent:
   # Cluster identification - provided by KPH SaaS
@@ -38,10 +55,14 @@ createNamespace: false
 
 # Operator settings
 operator:
+  # Image override (uses global.image if not set)
+  # To use a different image for operator, set these values
   image:
-    repository: 409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent
-    tag: latest
-    pullPolicy: Always
+    # Leave empty to use global.image settings
+    registry: ""
+    repository: ""
+    tag: ""
+    pullPolicy: ""
 
   replicas: 1
 
@@ -69,10 +90,14 @@ operator:
 collector:
   enabled: true
 
+  # Image override (uses global.image if not set)
+  # To use a different image for collector, set these values
   image:
-    repository: 409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent
-    tag: latest
-    pullPolicy: Always
+    # Leave empty to use global.image settings
+    registry: ""
+    repository: ""
+    tag: ""
+    pullPolicy: ""
 
   resources:
     requests:

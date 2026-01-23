@@ -24,6 +24,7 @@ spec:
         prometheus.io/port: "9090"
     spec:
       serviceAccountName: kph-collector
+      {{- include "kph-agent.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.collector.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -52,8 +53,8 @@ spec:
               mountPath: {{ .Values.telemetry.storage.path }}
       containers:
         - name: collector
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
-          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          image: {{ include "kph-agent.image" (dict "component" .Values.collector "global" .Values.global) | quote }}
+          imagePullPolicy: {{ include "kph-agent.imagePullPolicy" (dict "component" .Values.collector "global" .Values.global) }}
           command: ["/collector"]
           env:
             - name: NODE_NAME

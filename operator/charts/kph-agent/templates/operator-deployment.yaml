@@ -17,6 +17,7 @@ spec:
         app.kubernetes.io/name: kph-operator
     spec:
       serviceAccountName: kph-operator
+      {{- include "kph-agent.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -35,8 +36,8 @@ spec:
       {{- end }}
       containers:
         - name: manager
-          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
-          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          image: {{ include "kph-agent.image" (dict "component" .Values.operator "global" .Values.global) | quote }}
+          imagePullPolicy: {{ include "kph-agent.imagePullPolicy" (dict "component" .Values.operator "global" .Values.global) }}
           args:
             - --leader-elect
             - --health-probe-bind-address=:8081
