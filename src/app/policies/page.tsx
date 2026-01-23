@@ -54,6 +54,9 @@ export default function PoliciesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [filterType, setFilterType] = useState<PolicyType | "">("");
   const [filterStatus, setFilterStatus] = useState<PolicyStatus | "">("");
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
 
   // Pagination state - store cursors for each page to enable going back
@@ -159,6 +162,75 @@ export default function PoliciesPage() {
     archiveMutation.mutate({ id });
   };
 
+  // Bulk selection handlers
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedIds.size === policies.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(policies.map((p) => p.id)));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  // Bulk actions
+  const handleBulkDeploy = async () => {
+    const deployablePolicies = policies.filter(
+      (p) => selectedIds.has(p.id) && p.status === "DRAFT"
+    );
+    for (const policy of deployablePolicies) {
+      await deployMutation.mutateAsync({ id: policy.id });
+    }
+    clearSelection();
+  };
+
+  const handleBulkArchive = async () => {
+    const archivablePolicies = policies.filter(
+      (p) => selectedIds.has(p.id) && p.status === "DEPLOYED"
+    );
+    for (const policy of archivablePolicies) {
+      await archiveMutation.mutateAsync({ id: policy.id });
+    }
+    clearSelection();
+  };
+
+  const handleBulkDelete = async () => {
+    const deletablePolicies = policies.filter(
+      (p) => selectedIds.has(p.id) && p.status !== "DEPLOYED"
+    );
+    if (
+      !confirm(
+        `Are you sure you want to delete ${deletablePolicies.length} policies? This action cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    for (const policy of deletablePolicies) {
+      await deleteMutation.mutateAsync({ id: policy.id });
+    }
+    clearSelection();
+  };
+
+  // Get counts for bulk action eligibility
+  const selectedPolicies = policies.filter((p) => selectedIds.has(p.id));
+  const deployableCount = selectedPolicies.filter((p) => p.status === "DRAFT").length;
+  const archivableCount = selectedPolicies.filter((p) => p.status === "DEPLOYED").length;
+  const deletableCount = selectedPolicies.filter((p) => p.status !== "DEPLOYED").length;
+
   return (
     <AppShell>
       {/* Page Header */}
@@ -248,6 +320,61 @@ export default function PoliciesPage() {
         </div>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedIds.size > 0 && (
+        <div className="mb-6 flex items-center gap-4 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selectedIds.size === policies.length}
+              onChange={selectAll}
+              className="h-4 w-4 rounded border-card-border text-primary focus:ring-primary"
+              aria-label="Select all policies"
+            />
+            <span className="text-sm font-medium text-foreground">
+              {selectedIds.size} selected
+            </span>
+          </div>
+          <div className="flex-1" />
+          <div className="flex items-center gap-2">
+            {deployableCount > 0 && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleBulkDeploy}
+                disabled={deployMutation.isPending}
+              >
+                Deploy ({deployableCount})
+              </Button>
+            )}
+            {archivableCount > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleBulkArchive}
+                disabled={archiveMutation.isPending}
+              >
+                Archive ({archivableCount})
+              </Button>
+            )}
+            {deletableCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBulkDelete}
+                disabled={deleteMutation.isPending}
+                className="text-danger hover:text-danger"
+              >
+                Delete ({deletableCount})
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
@@ -300,8 +427,21 @@ export default function PoliciesPage() {
               const type = typeConfig[policy.type as PolicyType];
               const status = statusConfig[policy.status as PolicyStatus];
 
+              const isSelected = selectedIds.has(policy.id);
+
               return (
-                <Card key={policy.id} hover className="relative">
+                <Card key={policy.id} hover className={`relative ${isSelected ? "ring-2 ring-primary" : ""}`}>
+                  {/* Selection checkbox */}
+                  <div className="absolute right-4 top-4 z-10">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelection(policy.id)}
+                      className="h-4 w-4 rounded border-card-border text-primary focus:ring-primary"
+                      aria-label={`Select ${policy.name}`}
+                    />
+                  </div>
+
                   {/* Type indicator */}
                   <div
                     className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${
