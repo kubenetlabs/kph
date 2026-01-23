@@ -7,6 +7,8 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import PolicyForm from "~/components/policies/policy-form";
+import { Spinner } from "~/components/ui/spinner";
+import { Pagination } from "~/components/ui/pagination";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -45,20 +47,38 @@ const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warnin
   ARCHIVED: { variant: "muted", label: "Archived" },
 };
 
+const PAGE_SIZE = 12;
+
 export default function PoliciesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [filterType, setFilterType] = useState<PolicyType | "">("");
   const [filterStatus, setFilterStatus] = useState<PolicyStatus | "">("");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Pagination state - store cursors for each page to enable going back
+  const [page, setPage] = useState(1);
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+
   const utils = trpc.useUtils();
 
-  // Fetch policies with filters
+  // Get the cursor for the current page
+  const currentCursor = cursors[page - 1];
+
+  // Fetch policies with filters and pagination
   const { data, isLoading, error } = trpc.policy.list.useQuery({
     ...(filterType && { type: filterType }),
     ...(filterStatus && { status: filterStatus }),
     ...(searchQuery && { search: searchQuery }),
+    limit: PAGE_SIZE,
+    cursor: currentCursor,
   });
+
+  // Reset pagination when filters change
+  const handleFilterChange = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+    setter(value);
+    setPage(1);
+    setCursors([undefined]);
+  };
 
   // Fetch stats
   const { data: stats } = trpc.policy.getStats.useQuery();
@@ -97,6 +117,21 @@ export default function PoliciesPage() {
   });
 
   const policies = data?.policies ?? [];
+  const hasNextPage = !!data?.nextCursor;
+  const hasPrevPage = page > 1;
+
+  // Handle page navigation
+  const handlePageChange = (newPage: number) => {
+    if (newPage > page && data?.nextCursor) {
+      // Going forward - store the next cursor
+      setCursors((prev) => {
+        const updated = [...prev];
+        updated[newPage - 1] = data.nextCursor;
+        return updated;
+      });
+    }
+    setPage(newPage);
+  };
 
   const handleCreatePolicy = (formData: {
     name: string;
@@ -177,7 +212,7 @@ export default function PoliciesPage() {
           <span className="text-sm text-muted">Filter:</span>
           <select
             value={filterType}
-            onChange={(e) => setFilterType(e.target.value as PolicyType | "")}
+            onChange={(e) => handleFilterChange(setFilterType, e.target.value as PolicyType | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value="">All Types</option>
@@ -189,7 +224,7 @@ export default function PoliciesPage() {
           </select>
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as PolicyStatus | "")}
+            onChange={(e) => handleFilterChange(setFilterStatus, e.target.value as PolicyStatus | "")}
             className="rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value="">All Statuses</option>
@@ -206,7 +241,7 @@ export default function PoliciesPage() {
             type="text"
             placeholder="Search policies..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleFilterChange(setSearchQuery, e.target.value)}
             className="w-64 rounded-md border border-card-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
@@ -215,7 +250,7 @@ export default function PoliciesPage() {
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       )}
 
@@ -260,104 +295,119 @@ export default function PoliciesPage() {
 
       {/* Policies Grid */}
       {!isLoading && !error && policies.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {policies.map((policy) => {
-            const type = typeConfig[policy.type as PolicyType];
-            const status = statusConfig[policy.status as PolicyStatus];
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {policies.map((policy) => {
+              const type = typeConfig[policy.type as PolicyType];
+              const status = statusConfig[policy.status as PolicyStatus];
 
-            return (
-              <Card key={policy.id} hover className="relative">
-                {/* Type indicator */}
-                <div
-                  className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${
-                    policy.type.startsWith("CILIUM")
-                      ? "bg-cilium"
-                      : policy.type === "TETRAGON"
-                      ? "bg-tetragon"
-                      : "bg-gateway"
-                  }`}
-                />
+              return (
+                <Card key={policy.id} hover className="relative">
+                  {/* Type indicator */}
+                  <div
+                    className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${
+                      policy.type.startsWith("CILIUM")
+                        ? "bg-cilium"
+                        : policy.type === "TETRAGON"
+                        ? "bg-tetragon"
+                        : "bg-gateway"
+                    }`}
+                  />
 
-                <div className="pl-2">
-                  <div className="flex items-start justify-between">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-semibold text-foreground truncate">
-                        {policy.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted line-clamp-2">
-                        {policy.description ?? "No description"}
-                      </p>
+                  <div className="pl-2">
+                    <div className="flex items-start justify-between">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-foreground truncate">
+                          {policy.name}
+                        </h3>
+                        <p className="mt-1 text-sm text-muted line-clamp-2">
+                          {policy.description ?? "No description"}
+                        </p>
+                      </div>
+                      <Badge variant={status.variant}>{status.label}</Badge>
                     </div>
-                    <Badge variant={status.variant}>{status.label}</Badge>
-                  </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Badge variant={type.variant}>{type.label}</Badge>
-                    {policy.targetNamespaces.length > 0 && (
-                      <Badge variant="muted">
-                        {policy.targetNamespaces.length} namespace
-                        {policy.targetNamespaces.length > 1 ? "s" : ""}
-                      </Badge>
-                    )}
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between border-t border-card-border pt-3">
-                    <div className="text-xs text-muted">
-                      <span className="text-foreground">{policy.cluster.name}</span>
-                      {policy.deployedAt && (
-                        <>
-                          <span className="mx-1">•</span>
-                          <span>
-                            Deployed{" "}
-                            {new Date(policy.deployedAt).toLocaleDateString()}
-                          </span>
-                        </>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Badge variant={type.variant}>{type.label}</Badge>
+                      {policy.targetNamespaces.length > 0 && (
+                        <Badge variant="muted">
+                          {policy.targetNamespaces.length} namespace
+                          {policy.targetNamespaces.length > 1 ? "s" : ""}
+                        </Badge>
                       )}
                     </div>
-                    <div className="flex gap-1">
-                      {policy.status === "DRAFT" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeploy(policy.id)}
-                          disabled={deployMutation.isPending}
-                        >
-                          Deploy
-                        </Button>
-                      )}
-                      {policy.status === "DEPLOYED" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleArchive(policy.id)}
-                          disabled={archiveMutation.isPending}
-                        >
-                          Archive
-                        </Button>
-                      )}
-                      {policy.status !== "DEPLOYED" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(policy.id, policy.name)}
-                          disabled={deleteMutation.isPending}
-                          className="text-danger hover:text-danger"
-                        >
-                          Delete
-                        </Button>
-                      )}
-                      <a href={`/policies/${policy.id}`}>
-                        <Button variant="ghost" size="sm">
-                          View →
-                        </Button>
-                      </a>
+
+                    <div className="mt-4 flex items-center justify-between border-t border-card-border pt-3">
+                      <div className="text-xs text-muted">
+                        <span className="text-foreground">{policy.cluster.name}</span>
+                        {policy.deployedAt && (
+                          <>
+                            <span className="mx-1">•</span>
+                            <span>
+                              Deployed{" "}
+                              {new Date(policy.deployedAt).toLocaleDateString()}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        {policy.status === "DRAFT" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeploy(policy.id)}
+                            disabled={deployMutation.isPending}
+                          >
+                            Deploy
+                          </Button>
+                        )}
+                        {policy.status === "DEPLOYED" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleArchive(policy.id)}
+                            disabled={archiveMutation.isPending}
+                          >
+                            Archive
+                          </Button>
+                        )}
+                        {policy.status !== "DEPLOYED" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(policy.id, policy.name)}
+                            disabled={deleteMutation.isPending}
+                            className="text-danger hover:text-danger"
+                          >
+                            Delete
+                          </Button>
+                        )}
+                        <a href={`/policies/${policy.id}`}>
+                          <Button variant="ghost" size="sm">
+                            View →
+                          </Button>
+                        </a>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Pagination */}
+          {(hasNextPage || hasPrevPage) && (
+            <div className="mt-6 rounded-lg border border-card-border bg-card">
+              <Pagination
+                page={page}
+                hasNextPage={hasNextPage}
+                hasPrevPage={hasPrevPage}
+                onPageChange={handlePageChange}
+                pageSize={PAGE_SIZE}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* Create Policy Modal */}

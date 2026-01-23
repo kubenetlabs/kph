@@ -9,6 +9,7 @@ import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import CreateClusterForm from "~/components/clusters/create-cluster-form";
 import RegistrationTokens from "~/components/clusters/registration-tokens";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type TabType = "clusters" | "tokens";
@@ -154,8 +155,8 @@ export default function ClustersPage() {
 
       {/* Loading State */}
       {isLoading && (
-        <Card className="py-12 text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-accent border-t-transparent"></div>
+        <Card className="flex flex-col items-center py-12">
+          <Spinner size="lg" variant="accent" />
           <p className="mt-4 text-muted">Loading clusters...</p>
         </Card>
       )}

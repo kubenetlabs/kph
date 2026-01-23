@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 // Icons as inline SVGs
@@ -254,7 +255,7 @@ export default function InstalledPacksPage() {
         {isLoading ? (
           <Card>
             <CardContent className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <Spinner size="lg" />
             </CardContent>
           </Card>
         ) : !data?.installations.length ? (

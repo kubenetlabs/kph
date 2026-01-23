@@ -45,6 +45,8 @@ export interface OperatorAuthContext {
   organizationId: string;
   scopes: string[];
   tokenId: string;
+  /** Token expiry date (null if never expires) */
+  expiresAt: Date | null;
 }
 
 /**
@@ -121,6 +123,7 @@ export async function authenticateOperatorToken(
       organizationId: apiToken.organizationId,
       scopes: apiToken.scopes,
       tokenId: apiToken.id,
+      expiresAt: apiToken.expiresAt,
     };
 
     setCachedAuth(tokenHash, authContext);

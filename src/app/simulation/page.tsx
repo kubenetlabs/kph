@@ -7,6 +7,7 @@ import { Card, CardContent } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type SimulationStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
@@ -264,7 +265,7 @@ export default function SimulationPage() {
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       )}
 

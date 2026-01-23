@@ -7,6 +7,7 @@ import { useTopologyStore } from "~/stores/topology-store";
 import { trpc } from "~/lib/trpc";
 import { Card, CardContent } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
+import { Spinner } from "~/components/ui/spinner";
 
 export default function TopologyPage() {
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
@@ -198,13 +199,13 @@ export default function TopologyPage() {
           {/* Only show blocking spinner on initial load (no data yet) */}
           {isLoading && !topologyData && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <Spinner size="lg" />
             </div>
           )}
           {/* Subtle indicator during background refresh (has data, fetching new) */}
           {isFetching && topologyData && (
             <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded bg-background/90 px-2 py-1 text-xs text-muted border border-border">
-              <div className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
+              <Spinner size="xs" />
               Updating...
             </div>
           )}

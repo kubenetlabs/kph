@@ -6,6 +6,7 @@ import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
 import Button from "~/components/ui/button";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type RecommendationType = "COVERAGE_GAP" | "UNUSED_POLICY" | "CONSOLIDATION";
@@ -385,7 +386,7 @@ export default function RecommendationsPage() {
       {/* Loading state */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       )}
 

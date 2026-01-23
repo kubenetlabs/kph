@@ -4,6 +4,7 @@ import { useState } from "react";
 import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 // Top-level validation type tabs
@@ -464,7 +465,7 @@ function ProcessValidationContent({
   if (summaryLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -1024,7 +1025,7 @@ export default function ValidationDashboardPage() {
       {/* Loading state */}
       {summaryLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       )}
 

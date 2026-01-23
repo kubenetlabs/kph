@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 interface ProcessEventsPanelProps {
@@ -280,7 +281,7 @@ Do NOT use matchBinaries or matchNamespaces.`;
       <CardContent>
         {isLoading && (
           <div className="flex items-center justify-center py-8">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-tetragon border-t-transparent" />
+            <Spinner size="md" variant="tetragon" />
           </div>
         )}
 

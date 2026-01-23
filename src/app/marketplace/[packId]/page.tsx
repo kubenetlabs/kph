@@ -9,6 +9,7 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import Select from "~/components/ui/select";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 // Icons as inline SVGs
@@ -138,7 +139,7 @@ export default function PackDetailsPage() {
     return (
       <AppShell>
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <Spinner size="lg" />
         </div>
       </AppShell>
     );

@@ -8,6 +8,7 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import PolicyForm from "~/components/policies/policy-form";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -259,7 +260,7 @@ export default function PolicyDetailPage() {
     return (
       <AppShell>
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       </AppShell>
     );
@@ -324,7 +325,7 @@ export default function PolicyDetailPage() {
             )}
             {policy.status === "PENDING" && (
               <Button variant="secondary" disabled>
-                <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                <Spinner size="sm" variant="current" className="mr-2" />
                 Deploying...
               </Button>
             )}
@@ -354,7 +355,7 @@ export default function PolicyDetailPage() {
       {activeDeploymentData?.hasActiveDeployment && activeDeploymentData.deployment && (
         <div className="mb-6 rounded-lg border border-accent/30 bg-accent/5 p-4">
           <div className="flex items-center gap-3">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            <Spinner size="md" variant="accent" />
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-foreground">

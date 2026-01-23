@@ -8,6 +8,7 @@ import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
 import EditClusterForm, { type EditClusterFormData } from "~/components/clusters/edit-cluster-form";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 const statusConfig = {
@@ -82,7 +83,7 @@ export default function ClusterDetailPage() {
     return (
       <AppShell>
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-accent border-t-transparent"></div>
+          <Spinner size="lg" variant="accent" />
         </div>
       </AppShell>
     );

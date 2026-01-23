@@ -6,6 +6,7 @@ import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type SimulationStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
@@ -258,7 +259,7 @@ function ExportButton({ simulationId, format }: { simulationId: string; format: 
     >
       {isLoading ? (
         <>
-          <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <Spinner size="sm" variant="current" className="mr-2" />
           Exporting...
         </>
       ) : (
@@ -602,7 +603,7 @@ export default function SimulationDetailPage() {
     return (
       <AppShell>
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       </AppShell>
     );
@@ -742,7 +743,7 @@ export default function SimulationDetailPage() {
         <Card className="mb-6 border-accent/30 bg-accent/5">
           <CardContent className="py-4">
             <div className="flex items-center gap-4">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-accent border-t-transparent" />
+              <Spinner size="xl" variant="accent" />
               <div>
                 <h3 className="font-semibold text-foreground">
                   {isPending ? "Waiting for Processing" : "Simulation Running"}

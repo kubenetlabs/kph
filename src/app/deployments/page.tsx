@@ -5,6 +5,7 @@ import AppShell from "~/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Badge from "~/components/ui/badge";
 import Button from "~/components/ui/button";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type DeploymentStatus = "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "ROLLED_BACK";
@@ -146,7 +147,7 @@ export default function DeploymentsPage() {
                   className="flex items-center justify-between rounded-md bg-background/50 px-3 py-2"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                    <Spinner size="sm" variant="accent" />
                     <span className="font-medium text-foreground">{deployment.policy.name}</span>
                     <span className="text-sm text-muted">{deployment.cluster.name}</span>
                   </div>
@@ -194,7 +195,7 @@ export default function DeploymentsPage() {
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       )}
 

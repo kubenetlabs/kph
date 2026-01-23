@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import Modal from "~/components/ui/modal";
+import { Spinner } from "~/components/ui/spinner";
 import { trpc } from "~/lib/trpc";
 
 type PolicyType =
@@ -113,7 +114,7 @@ export default function TemplateDetailPage() {
     return (
       <AppShell>
         <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <Spinner size="lg" />
         </div>
       </AppShell>
     );

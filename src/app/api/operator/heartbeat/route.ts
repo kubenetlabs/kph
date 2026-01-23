@@ -101,12 +101,37 @@ export async function POST(request: NextRequest) {
       cache.set(cacheKey, pendingPolicies, cacheTTL.pendingPolicies);
     }
 
+    // Calculate token expiry warning
+    let tokenExpiryWarning: {
+      expiresAt: string;
+      expiresInDays: number;
+      shouldRotate: boolean;
+    } | null = null;
+
+    if (auth.expiresAt) {
+      const now = new Date();
+      const expiresAt = new Date(auth.expiresAt);
+      const msUntilExpiry = expiresAt.getTime() - now.getTime();
+      const daysUntilExpiry = Math.floor(msUntilExpiry / (1000 * 60 * 60 * 24));
+
+      // Warn if token expires within 14 days
+      if (daysUntilExpiry <= 14) {
+        tokenExpiryWarning = {
+          expiresAt: expiresAt.toISOString(),
+          expiresInDays: Math.max(0, daysUntilExpiry),
+          shouldRotate: true,
+        };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       clusterId: cluster.id,
       clusterStatus: cluster.status,
       pendingPoliciesCount: pendingPolicies,
       nextHeartbeat: 60, // seconds until next expected heartbeat
+      // Token expiry warning (included when token expires within 14 days)
+      ...(tokenExpiryWarning && { tokenExpiryWarning }),
     });
   } catch (error) {
     console.error("Error processing heartbeat:", error);

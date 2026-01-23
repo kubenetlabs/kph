@@ -43,10 +43,14 @@ export const tokenRouter = createTRPCRouter({
         type: z.enum(["AGENT", "API"]),
         clusterId: z.string().optional(),
         scopes: z.array(z.string()).optional(),
-        expiryDays: z.number().min(0).max(365).default(365),
+        // Note: AGENT tokens capped at 90 days for security, API tokens up to 365
+        expiryDays: z.number().min(0).max(365).default(90),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Enforce 90-day max expiry for AGENT tokens (security best practice)
+      const effectiveExpiryDays =
+        input.type === "AGENT" ? Math.min(input.expiryDays, 90) : input.expiryDays;
       // Permission check based on token type
       const requiredRole = input.type === "API" ? "ORG_ADMIN" : "CLUSTER_ADMIN";
       if (!ctx.user?.isSuperAdmin && !hasMinRole(ctx.user?.newRole ?? "VIEWER", requiredRole)) {
@@ -73,11 +77,11 @@ export const tokenRouter = createTRPCRouter({
         }
       }
 
-      // Generate the token
+      // Generate the token with enforced expiry
       const tokenData =
         input.type === "API"
-          ? generateApiToken(input.expiryDays)
-          : generateAgentToken(input.type, input.expiryDays);
+          ? generateApiToken(effectiveExpiryDays)
+          : generateAgentToken(input.type, effectiveExpiryDays);
 
       // Determine scopes
       const scopes =
@@ -359,7 +363,8 @@ export const tokenRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        expiryDays: z.number().min(0).max(365).default(365),
+        // Note: AGENT tokens capped at 90 days for security
+        expiryDays: z.number().min(0).max(365).default(90),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -385,11 +390,15 @@ export const tokenRouter = createTRPCRouter({
         });
       }
 
+      // Enforce 90-day max for AGENT tokens
+      const effectiveExpiryDays =
+        oldToken.type === "AGENT" ? Math.min(input.expiryDays, 90) : input.expiryDays;
+
       // Generate new token with same settings
       const tokenData =
         oldToken.type === "API"
-          ? generateApiToken(input.expiryDays)
-          : generateAgentToken(oldToken.type as "AGENT", input.expiryDays);
+          ? generateApiToken(effectiveExpiryDays)
+          : generateAgentToken(oldToken.type as "AGENT", effectiveExpiryDays);
 
       // Transaction: revoke old, create new
       const [, newToken] = await ctx.db.$transaction([

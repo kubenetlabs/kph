@@ -12,6 +12,7 @@ import Input from "~/components/ui/input";
 import Modal from "~/components/ui/modal";
 import { trpc } from "~/lib/trpc";
 import { validatePolicy, type ValidationResult } from "~/lib/policy-validator";
+import { Spinner } from "~/components/ui/spinner";
 
 type PolicyType =
   | "CILIUM_NETWORK"
@@ -434,7 +435,7 @@ function GeneratePolicyPageContent() {
               {isGenerating && (
                 <div className="flex h-96 items-center justify-center">
                   <div className="text-center">
-                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <Spinner size="lg" className="mx-auto" />
                     <p className="mt-4 text-sm text-muted">
                       Claude is generating your policy...
                     </p>
@@ -679,7 +680,7 @@ export default function GeneratePolicyPage() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center min-h-screen">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <Spinner size="lg" />
       </div>
     }>
       <GeneratePolicyPageContent />
