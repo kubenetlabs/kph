@@ -2,18 +2,19 @@ import { type Config } from "tailwindcss";
 
 export default {
   content: ["./src/**/*.tsx"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        // Core backgrounds
-        background: "#0A0E14",
-        foreground: "#F0F6FC",
-        
-        // Card surfaces
+        // Core backgrounds (use CSS variables for theme switching)
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+
+        // Card surfaces (use CSS variables for theme switching)
         card: {
-          DEFAULT: "#151B24",
-          hover: "#1C2432",
-          border: "#334155",
+          DEFAULT: "var(--card)",
+          hover: "var(--card-hover)",
+          border: "var(--card-border)",
         },
         
         // Primary (teal/green - success, primary actions)
@@ -62,13 +63,13 @@ export default {
           dark: "#059669",
         },
         
-        // Muted text and borders
+        // Muted text and borders (use CSS variables for theme switching)
         muted: {
-          DEFAULT: "#8B949E",
-          foreground: "#8B949E",
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted)",
         },
-        
-        border: "#334155",
+
+        border: "var(--card-border)",
         
         // Component-specific colors
         cilium: "#7C3AED",

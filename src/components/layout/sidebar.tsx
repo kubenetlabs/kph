@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "~/lib/utils";
 import { trpc } from "~/lib/trpc";
+import { ThemeSelect } from "~/components/theme/theme-toggle";
 
 // Using simple SVG icons instead of heroicons for simplicity
 const icons = {
@@ -192,6 +193,11 @@ export default function Sidebar() {
 
       {/* Bottom Navigation */}
       <div className="border-t border-card-border px-2 py-4">
+        {/* Theme Toggle */}
+        <div className="mb-2 flex items-center justify-between px-3">
+          <span className="text-xs font-medium text-muted">Theme</span>
+          <ThemeSelect />
+        </div>
         {bottomNavigation.map((item) => (
           <Link
             key={item.name}

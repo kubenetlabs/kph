@@ -7,9 +7,26 @@
    ============================================================================ */
 
 @layer base {
+  /* Light mode (default) */
   :root {
-    --background: 210 50% 5%;
-    --foreground: 210 40% 96%;
+    --background: #FFFFFF;
+    --foreground: #0A0E14;
+    --card: #F8FAFC;
+    --card-hover: #F1F5F9;
+    --card-border: #E2E8F0;
+    --muted: #64748B;
+    color-scheme: light;
+  }
+
+  /* Dark mode */
+  .dark {
+    --background: #0A0E14;
+    --foreground: #F0F6FC;
+    --card: #151B24;
+    --card-hover: #1C2432;
+    --card-border: #334155;
+    --muted: #8B949E;
+    color-scheme: dark;
   }
 
   * {
@@ -22,9 +39,14 @@
   }
 
   /* Force dark mode styling for native form controls (select dropdowns) */
+  .dark select,
+  .dark select option {
+    color-scheme: dark;
+  }
+
   select,
   select option {
-    color-scheme: dark;
+    color-scheme: inherit;
   }
 
   /* Custom scrollbar for dark theme */
