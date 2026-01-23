@@ -53,6 +53,18 @@ operator:
       cpu: 500m
       memory: 256Mi
 
+  # Node selection for multi-architecture support
+  # Example for arm64: nodeSelector: { kubernetes.io/arch: arm64 }
+  # Example for amd64: nodeSelector: { kubernetes.io/arch: amd64 }
+  # Leave empty to schedule on any architecture (requires multi-arch images)
+  nodeSelector: {}
+
+  # Tolerations for scheduling on tainted nodes
+  tolerations: []
+
+  # Affinity rules for advanced scheduling
+  affinity: {}
+
 # Collector settings (telemetry collection via Hubble/Tetragon)
 collector:
   enabled: true
@@ -69,6 +81,18 @@ collector:
     limits:
       cpu: "1"
       memory: 2Gi
+
+  # Node selection for multi-architecture support
+  # The collector runs as a DaemonSet, so it schedules on all matching nodes
+  # Example for arm64 only: nodeSelector: { kubernetes.io/arch: arm64 }
+  # Leave empty to run on all nodes (requires multi-arch images)
+  nodeSelector: {}
+
+  # Additional tolerations (DaemonSet already tolerates all taints by default)
+  tolerations: []
+
+  # Affinity rules for advanced scheduling
+  affinity: {}
 
 # Telemetry settings
 telemetry:
