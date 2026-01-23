@@ -148,6 +148,27 @@ export default function Sidebar() {
         </div>
       </div>
 
+      {/* Quick Search Hint */}
+      <div className="border-b border-card-border px-4 py-3">
+        <button
+          onClick={() => {
+            const event = new KeyboardEvent("keydown", {
+              key: "k",
+              metaKey: true,
+              bubbles: true,
+            });
+            document.dispatchEvent(event);
+          }}
+          className="flex w-full items-center gap-2 rounded-md border border-card-border bg-background px-3 py-1.5 text-sm text-muted transition-colors hover:border-primary/50 hover:text-foreground"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <span className="flex-1 text-left">Quick search...</span>
+          <kbd className="rounded bg-card px-1.5 py-0.5 text-xs font-mono text-muted">⌘K</kbd>
+        </button>
+      </div>
+
       {/* Main Navigation */}
       <nav className="flex-1 space-y-1 px-2 py-4">
         {navigation.map((item) => (
