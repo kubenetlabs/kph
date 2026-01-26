@@ -228,6 +228,8 @@ func main() {
 	if cfg.SimulationEnabled && cfg.SaaSEnabled && cfg.SaaSEndpoint != "" {
 		// Create SaaS client for simulation
 		saasClient := saas.NewClient(cfg.SaaSEndpoint, cfg.SaaSAPIKey, cfg.ClusterID, log)
+		// Set node name for multi-node simulation aggregation
+		saasClient.SetNodeName(cfg.NodeName)
 
 		// Create simulation engine
 		simEngine := simulation.NewEngine(simulation.EngineConfig{

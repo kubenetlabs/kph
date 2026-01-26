@@ -23,9 +23,17 @@ interface PendingSimulation {
   requestedAt: string;
 }
 
+// Aggregation deadline - how long to wait for all nodes (5 minutes)
+const AGGREGATION_TIMEOUT_MS = 5 * 60 * 1000;
+
 /**
  * GET /api/operator/simulation/pending
- * Returns pending simulations for the authenticated cluster
+ * Returns pending simulations for the authenticated cluster.
+ *
+ * Multi-node aggregation:
+ * - Each collector node polls this endpoint
+ * - Simulations are returned to collectors that haven't processed them yet
+ * - Node identification via X-Node-Name header
  */
 export async function GET(request: NextRequest) {
   try {
@@ -43,16 +51,20 @@ export async function GET(request: NextRequest) {
       return scopeError;
     }
 
-    // Fetch pending simulations from the Simulation table (created by UI)
+    // Get the node name from header (sent by collector)
+    const nodeName = request.headers.get("X-Node-Name") ?? "unknown";
+
+    // Fetch simulations that this node hasn't processed yet
+    // Include PENDING and RUNNING (for multi-node aggregation)
     const pendingSimulations = await db.simulation.findMany({
       where: {
         clusterId: auth.clusterId,
-        status: "PENDING",
+        status: { in: ["PENDING", "RUNNING"] },
       },
       orderBy: {
-        createdAt: "asc", // Process oldest first
+        createdAt: "asc",
       },
-      take: 10, // Limit batch size
+      take: 10,
       include: {
         policy: {
           select: {
@@ -61,11 +73,22 @@ export async function GET(request: NextRequest) {
             targetNamespaces: true,
           },
         },
+        cluster: {
+          select: {
+            nodeCount: true,
+          },
+        },
       },
     });
 
+    // Filter to simulations this node hasn't processed
+    const simulationsForThisNode = pendingSimulations.filter((sim) => {
+      const processedNodes = (sim.processedNodes as string[] | null) ?? [];
+      return !processedNodes.includes(nodeName);
+    });
+
     // Transform to API response format
-    const simulations: PendingSimulation[] = pendingSimulations.map((sim) => ({
+    const simulations: PendingSimulation[] = simulationsForThisNode.map((sim) => ({
       simulationId: sim.id,
       policyContent: sim.policy.content,
       policyType: sim.policy.type,
@@ -79,14 +102,27 @@ export async function GET(request: NextRequest) {
       requestedAt: sim.createdAt.toISOString(),
     }));
 
-    // Mark simulations as RUNNING to prevent duplicate processing
-    if (simulations.length > 0) {
+    // Initialize multi-node tracking for PENDING simulations
+    const pendingIds = simulationsForThisNode
+      .filter((sim) => sim.status === "PENDING")
+      .map((sim) => sim.id);
+
+    if (pendingIds.length > 0) {
+      // Get node count from cluster or default to 1
+      const firstSim = simulationsForThisNode[0];
+      const expectedNodes = firstSim?.cluster.nodeCount ?? 1;
+      const aggregationDeadline = new Date(Date.now() + AGGREGATION_TIMEOUT_MS);
+
       await db.simulation.updateMany({
         where: {
-          id: { in: simulations.map((s) => s.simulationId) },
+          id: { in: pendingIds },
         },
         data: {
           status: "RUNNING",
+          expectedNodes,
+          processedNodes: [],
+          nodeResults: {},
+          aggregationDeadline,
         },
       });
     }
@@ -94,6 +130,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       simulations,
+      nodeName, // Echo back for debugging
     });
   } catch (error) {
     console.error("Error fetching pending simulations:", error);

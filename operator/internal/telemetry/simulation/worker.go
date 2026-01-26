@@ -194,6 +194,7 @@ func (w *Worker) reportResult(ctx context.Context, simulationID string, resp *Si
 	// Convert simulation response to SaaS result format
 	result := &saas.SimulationResult{
 		SimulationID:       simulationID,
+		NodeName:           w.saasClient.GetNodeName(), // For multi-node aggregation
 		PolicyContent:      pending.PolicyContent,
 		PolicyType:         pending.PolicyType,
 		StartTime:          pending.StartTime,

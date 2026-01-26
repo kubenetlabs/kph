@@ -834,13 +834,19 @@ model Simulation {
   startTime DateTime
   endTime   DateTime
 
-  // Results
+  // Multi-node aggregation tracking
+  expectedNodes   Int?      // Number of collector nodes in cluster
+  processedNodes  Json?     // Array of node names that have submitted results
+  nodeResults     Json?     // Object mapping node name to partial results
+  aggregationDeadline DateTime? // When to finalize even if not all nodes responded
+
+  // Aggregated Results
   flowsAnalyzed   Int?
   flowsAllowed    Int?
   flowsDenied     Int?
   flowsChanged    Int? // Flows that would have different verdict
   completedAt     DateTime?
-  
+
   // Detailed results stored as JSON
   results Json?
   

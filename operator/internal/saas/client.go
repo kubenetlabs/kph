@@ -17,6 +17,7 @@ type Client struct {
 	endpoint   string
 	apiToken   string
 	clusterID  string
+	nodeName   string // Node name for multi-node simulation aggregation
 	httpClient *http.Client
 	log        logr.Logger
 }
@@ -60,6 +61,16 @@ func (c *Client) SetClusterID(clusterID string) {
 // GetClusterID returns the current cluster ID
 func (c *Client) GetClusterID() string {
 	return c.clusterID
+}
+
+// SetNodeName sets the node name for multi-node simulation aggregation
+func (c *Client) SetNodeName(nodeName string) {
+	c.nodeName = nodeName
+}
+
+// GetNodeName returns the current node name
+func (c *Client) GetNodeName() string {
+	return c.nodeName
 }
 
 // BootstrapRequest is the request body for cluster bootstrap
@@ -440,6 +451,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "PolicyHub-Operator/1.0")
+	if c.nodeName != "" {
+		req.Header.Set("X-Node-Name", c.nodeName)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -544,6 +558,7 @@ type SubmitAggregatesResponse struct {
 type SimulationResult struct {
 	SimulationID       string                       `json:"simulationId"`
 	ClusterID          string                       `json:"clusterId"`
+	NodeName           string                       `json:"nodeName,omitempty"` // For multi-node aggregation
 	PolicyContent      string                       `json:"policyContent"`
 	PolicyType         string                       `json:"policyType"`
 	StartTime          time.Time                    `json:"startTime"`
