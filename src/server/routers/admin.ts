@@ -6,8 +6,10 @@
  */
 
 import { z } from "zod";
+import { createId } from "@paralleldrive/cuid2";
 import { createTRPCRouter, superAdminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { sendInvitationEmail } from "~/lib/email";
 
 export const adminRouter = createTRPCRouter({
   /**
@@ -563,9 +565,36 @@ export const adminRouter = createTRPCRouter({
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
 
-      // Create the invitation
+      // Generate invitation ID upfront so email link matches DB record
+      const invitationId = createId();
+
+      // Get inviter info for the email
+      const inviter = await ctx.db.user.findUnique({
+        where: { id: ctx.userId },
+        select: { name: true, email: true },
+      });
+
+      // Send invitation email FIRST - if this fails, no DB record is created
+      try {
+        await sendInvitationEmail({
+          to: input.email.toLowerCase(),
+          organizationName: org.name,
+          inviterName: inviter?.name ?? inviter?.email ?? "A Policy Hub admin",
+          role: input.role,
+          invitationId,
+          expiresAt,
+        });
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Failed to send invitation email",
+        });
+      }
+
+      // Create the invitation with pre-generated ID
       const invitation = await ctx.db.invitation.create({
         data: {
+          id: invitationId,
           email: input.email.toLowerCase(),
           organizationId: input.organizationId,
           role: input.role,
@@ -589,6 +618,78 @@ export const adminRouter = createTRPCRouter({
         role: invitation.role,
         expiresAt: invitation.expiresAt,
         organization: invitation.organization,
+      };
+    }),
+
+  /**
+   * List all invitations across all organizations (SuperAdmin only)
+   */
+  listAllInvitations: superAdminProcedure
+    .input(
+      z.object({
+        status: z.enum(["pending", "accepted", "expired", "all"]).default("all"),
+        organizationId: z.string().optional(),
+        limit: z.number().min(1).max(100).default(50),
+        cursor: z.string().optional(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const now = new Date();
+
+      const whereClause = {
+        ...(input.organizationId && { organizationId: input.organizationId }),
+        ...(input.status === "pending" && {
+          acceptedAt: null,
+          expiresAt: { gt: now },
+        }),
+        ...(input.status === "accepted" && {
+          acceptedAt: { not: null },
+        }),
+        ...(input.status === "expired" && {
+          acceptedAt: null,
+          expiresAt: { lte: now },
+        }),
+      };
+
+      const invitations = await ctx.db.invitation.findMany({
+        take: input.limit + 1,
+        cursor: input.cursor ? { id: input.cursor } : undefined,
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          invitedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      let nextCursor: string | undefined;
+      if (invitations.length > input.limit) {
+        const nextItem = invitations.pop();
+        nextCursor = nextItem?.id;
+      }
+
+      return {
+        invitations: invitations.map((inv) => ({
+          ...inv,
+          status: inv.acceptedAt
+            ? "accepted"
+            : inv.expiresAt < now
+              ? "expired"
+              : "pending",
+        })),
+        nextCursor,
       };
     }),
 });

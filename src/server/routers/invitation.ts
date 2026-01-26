@@ -7,8 +7,10 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { createId } from "@paralleldrive/cuid2";
 import { createTRPCRouter, orgProtectedProcedure, publicProcedure, protectedProcedure } from "../trpc";
 import { hasMinRole, logAudit } from "~/lib/permissions";
+import { sendInvitationEmail } from "~/lib/email";
 
 // Default invitation expiry: 7 days
 const INVITATION_EXPIRY_DAYS = 7;
@@ -70,13 +72,47 @@ export const invitationRouter = createTRPCRouter({
         });
       }
 
+      // Get organization name for the email
+      const organization = await ctx.db.organization.findUnique({
+        where: { id: ctx.organizationId },
+        select: { name: true, slug: true },
+      });
+
+      if (!organization) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
       // Calculate expiry date
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + INVITATION_EXPIRY_DAYS);
 
-      // Create the invitation
+      // Generate invitation ID upfront so email link matches DB record
+      const invitationId = createId();
+
+      // Send invitation email FIRST - if this fails, no DB record is created
+      try {
+        await sendInvitationEmail({
+          to: input.email.toLowerCase(),
+          organizationName: organization.name,
+          inviterName: ctx.user.name ?? ctx.user.email,
+          role: input.role,
+          invitationId,
+          expiresAt,
+        });
+      } catch (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Failed to send invitation email",
+        });
+      }
+
+      // Create the invitation with pre-generated ID
       const invitation = await ctx.db.invitation.create({
         data: {
+          id: invitationId,
           email: input.email.toLowerCase(),
           organizationId: ctx.organizationId,
           role: input.role,
