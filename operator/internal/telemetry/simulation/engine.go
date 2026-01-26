@@ -57,10 +57,14 @@ func (e *Engine) Simulate(ctx context.Context, req *SimulationRequest) (*Simulat
 	}
 
 	// Query historical flows
+	// NOTE: We don't filter by namespace at the storage level because:
+	// 1. Historical data may have empty namespace fields (Hubble GetNamespace() limitation)
+	// 2. The simulation engine evaluates each flow against the policy's endpointSelector
+	// 3. Policy matching uses labels, which works even when namespace field is empty
 	queryReq := models.QueryEventsRequest{
 		StartTime:  req.StartTime,
 		EndTime:    req.EndTime,
-		Namespaces: req.Namespaces,
+		Namespaces: nil, // Don't filter by namespace - let policy evaluation handle it
 		EventTypes: []string{string(models.EventTypeFlow)},
 		Limit:      0, // Get all matching events
 	}
@@ -68,7 +72,7 @@ func (e *Engine) Simulate(ctx context.Context, req *SimulationRequest) (*Simulat
 	e.log.Info("Querying storage for historical flows",
 		"startTime", req.StartTime,
 		"endTime", req.EndTime,
-		"namespaces", req.Namespaces,
+		"targetNamespaces", req.Namespaces, // Log target namespaces for debugging
 	)
 
 	result, err := e.storageMgr.Query(ctx, queryReq)
