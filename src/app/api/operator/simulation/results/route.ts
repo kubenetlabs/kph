@@ -298,13 +298,13 @@ export async function POST(request: NextRequest) {
         data: {
           status,
           completedAt: new Date(),
-          processedNodes: updatedProcessedNodes,
-          nodeResults: updatedNodeResults,
+          processedNodes: updatedProcessedNodes as unknown as string[],
+          nodeResults: updatedNodeResults as unknown as Record<string, unknown>,
           flowsAnalyzed: aggregated.flowsAnalyzed,
           flowsAllowed: aggregated.flowsAllowed,
           flowsDenied: aggregated.flowsDenied,
           flowsChanged: aggregated.flowsChanged,
-          results: aggregated.aggregatedResults,
+          results: aggregated.aggregatedResults as unknown as Record<string, unknown>,
         },
       });
 
@@ -320,8 +320,8 @@ export async function POST(request: NextRequest) {
       await db.simulation.update({
         where: { id: data.simulationId },
         data: {
-          processedNodes: updatedProcessedNodes,
-          nodeResults: updatedNodeResults,
+          processedNodes: updatedProcessedNodes as unknown as string[],
+          nodeResults: updatedNodeResults as unknown as Record<string, unknown>,
         },
       });
 
