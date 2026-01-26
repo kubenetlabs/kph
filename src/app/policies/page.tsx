@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card } from "~/components/ui/card";
@@ -61,7 +61,22 @@ type FlowPreFill = {
   protocol: string;
 };
 
+// Wrapper component with Suspense boundary for useSearchParams
 export default function PoliciesPage() {
+  return (
+    <Suspense fallback={
+      <AppShell>
+        <div className="flex items-center justify-center py-12">
+          <Spinner size="lg" />
+        </div>
+      </AppShell>
+    }>
+      <PoliciesPageContent />
+    </Suspense>
+  );
+}
+
+function PoliciesPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
