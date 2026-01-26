@@ -43,3 +43,6 @@ next-env.d.ts
 # Operator binaries
 operator/bin/
 operator/collector
+
+*storybook.log
+storybook-static
