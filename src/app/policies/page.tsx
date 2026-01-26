@@ -59,6 +59,7 @@ type FlowPreFill = {
   dstPod: string;
   port: number;
   protocol: string;
+  policyAction: "allow" | "deny";
 };
 
 // Wrapper component with Suspense boundary for useSearchParams
@@ -115,6 +116,7 @@ function PoliciesPageContent() {
       const dstPod = searchParams.get("dstPod") ?? "";
       const port = parseInt(searchParams.get("port") ?? "0", 10);
       const protocol = searchParams.get("protocol") ?? "tcp";
+      const policyAction = (searchParams.get("policyAction") ?? "allow") as "allow" | "deny";
 
       setFlowPreFill({
         srcNamespace,
@@ -123,6 +125,7 @@ function PoliciesPageContent() {
         dstPod,
         port,
         protocol,
+        policyAction,
       });
       setIsCreateModalOpen(true);
 
@@ -622,9 +625,15 @@ function PoliciesPageContent() {
           setIsCreateModalOpen(false);
           setFlowPreFill(null);
         }}
-        title="Create New Policy"
+        title={flowPreFill
+          ? flowPreFill.policyAction === "deny"
+            ? "Create Deny Policy"
+            : "Create Allow Policy"
+          : "Create New Policy"}
         description={flowPreFill
-          ? `Allow traffic from ${flowPreFill.srcNamespace}/${flowPreFill.srcPod} to ${flowPreFill.dstNamespace}/${flowPreFill.dstPod}`
+          ? flowPreFill.policyAction === "deny"
+            ? `Block traffic from ${flowPreFill.srcNamespace}/${flowPreFill.srcPod} to ${flowPreFill.dstNamespace}/${flowPreFill.dstPod}`
+            : `Allow traffic from ${flowPreFill.srcNamespace}/${flowPreFill.srcPod} to ${flowPreFill.dstNamespace}/${flowPreFill.dstPod}`
           : "Define a new network, runtime, or ingress policy"}
         size="2xl"
       >

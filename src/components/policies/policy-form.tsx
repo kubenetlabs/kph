@@ -59,6 +59,7 @@ interface FlowPreFill {
   dstPod: string;
   port: number;
   protocol: string;
+  policyAction: "allow" | "deny";
 }
 
 interface PolicyFormProps {
@@ -102,10 +103,16 @@ function generatePolicyFromFlow(flow: FlowPreFill): { name: string; description:
 
   const srcWorkload = extractWorkloadName(flow.srcPod);
   const dstWorkload = extractWorkloadName(flow.dstPod);
+  const isAllow = flow.policyAction === "allow";
 
-  const policyName = `allow-${srcWorkload}-to-${dstWorkload}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 63);
+  const policyName = `${isAllow ? "allow" : "deny"}-${srcWorkload}-to-${dstWorkload}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 63);
 
-  const content = `apiVersion: "cilium.io/v2"
+  let content: string;
+  let description: string;
+
+  if (isAllow) {
+    // Allow policy - explicitly permit traffic from source to destination
+    content = `apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
   name: "${policyName}"
@@ -125,9 +132,38 @@ spec:
             - port: "${flow.port}"
               protocol: ${flow.protocol.toUpperCase()}`;
 
+    description = `Allow ${flow.protocol.toUpperCase()} traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload} on port ${flow.port}`;
+  } else {
+    // Deny policy - explicitly block traffic from source to destination
+    // In Cilium, deny is achieved by creating a policy that selects the endpoint
+    // but does NOT include the source in the allowed ingress rules.
+    // For explicit deny, we use ingressDeny (Cilium 1.11+)
+    content = `apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "${policyName}"
+  namespace: "${flow.dstNamespace}"
+spec:
+  description: "Deny traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload}"
+  endpointSelector:
+    matchLabels:
+      app: ${dstWorkload}
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            app: ${srcWorkload}
+            "k8s:io.kubernetes.pod.namespace": ${flow.srcNamespace}
+      toPorts:
+        - ports:
+            - port: "${flow.port}"
+              protocol: ${flow.protocol.toUpperCase()}`;
+
+    description = `Deny ${flow.protocol.toUpperCase()} traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload} on port ${flow.port}`;
+  }
+
   return {
     name: policyName,
-    description: `Allow ${flow.protocol.toUpperCase()} traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload} on port ${flow.port}`,
+    description,
     content,
     targetNamespace: flow.dstNamespace,
   };

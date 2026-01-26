@@ -9,6 +9,33 @@ export function DetailPanel() {
   const router = useRouter();
   const { selectedNodeId, selectedEdgeId, selectedEdgeData, detailPanelOpen, setDetailPanelOpen } = useTopologyStore();
 
+  // Helper to navigate to policy creation with pre-filled data
+  const navigateToCreatePolicy = (policyAction: "allow" | "deny") => {
+    if (!selectedEdgeData) return;
+
+    const srcParts = selectedEdgeData.source.split("/");
+    const dstParts = selectedEdgeData.target.split("/");
+
+    const srcNamespace = srcParts[0] ?? "";
+    const srcPod = srcParts[1] ?? "";
+    const dstNamespace = dstParts[0] ?? "";
+    const dstPod = dstParts[1] ?? "";
+    const port = selectedEdgeData.data.port;
+    const protocol = selectedEdgeData.data.protocol.toLowerCase();
+
+    const params = new URLSearchParams({
+      action: "create",
+      policyAction,
+      srcNamespace,
+      srcPod,
+      dstNamespace,
+      dstPod,
+      port: port.toString(),
+      protocol,
+    });
+    router.push(`/policies?${params.toString()}`);
+  };
+
   if (!detailPanelOpen) return null;
 
   return (
@@ -130,39 +157,45 @@ export function DetailPanel() {
                   </svg>
                   View Policies
                 </Button>
+              </div>
+            </div>
+
+            {/* Create Policy Actions */}
+            <div>
+              <label className="text-xs text-muted uppercase tracking-wide">Create Policy</label>
+              <p className="text-xs text-muted mt-1 mb-2">
+                {selectedEdgeData.data.verdict === "denied"
+                  ? "This traffic is currently blocked. Create a policy to allow or explicitly deny it."
+                  : selectedEdgeData.data.verdict === "allowed"
+                  ? "This traffic is currently allowed. Create a policy to block or explicitly allow it."
+                  : "No policy covers this traffic. Create one to control this flow."}
+              </p>
+              <div className="mt-2 space-y-2">
                 <Button
                   variant="primary"
                   size="sm"
-                  className="w-full justify-start"
+                  className="w-full justify-start bg-green-600 hover:bg-green-700"
                   onClick={() => {
-                    // Parse source and destination to pre-fill policy creation
-                    const srcParts = selectedEdgeData.source.split("/");
-                    const dstParts = selectedEdgeData.target.split("/");
-
-                    const srcNamespace = srcParts[0] ?? "";
-                    const srcPod = srcParts[1] ?? "";
-                    const dstNamespace = dstParts[0] ?? "";
-                    const dstPod = dstParts[1] ?? "";
-                    const port = selectedEdgeData.data.port;
-                    const protocol = selectedEdgeData.data.protocol.toLowerCase();
-
-                    // Navigate to policies page with create modal params
-                    const params = new URLSearchParams({
-                      action: "create",
-                      srcNamespace,
-                      srcPod,
-                      dstNamespace,
-                      dstPod,
-                      port: port.toString(),
-                      protocol,
-                    });
-                    router.push(`/policies?${params.toString()}`);
+                    navigateToCreatePolicy("allow");
                   }}
                 >
                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Create Policy
+                  Allow This Traffic
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-start bg-red-600 hover:bg-red-700"
+                  onClick={() => {
+                    navigateToCreatePolicy("deny");
+                  }}
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                  Block This Traffic
                 </Button>
               </div>
             </div>
