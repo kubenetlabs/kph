@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs";
-import { useState } from "react";
-import { SortableHeader, useSortState, sortData } from "./sortable-header";
+import { SortableHeader } from "./sortable-header";
 
 const meta: Meta<typeof SortableHeader> = {
   title: "UI/SortableHeader",
@@ -9,6 +8,16 @@ const meta: Meta<typeof SortableHeader> = {
     layout: "centered",
   },
   tags: ["autodocs"],
+  argTypes: {
+    column: {
+      control: "text",
+      description: "Column identifier",
+    },
+    label: {
+      control: "text",
+      description: "Display label for the column",
+    },
+  },
 };
 
 export default meta;
@@ -18,7 +27,7 @@ export const Default: Story = {
   args: {
     column: "name",
     label: "Name",
-    currentSort: { column: null, direction: "asc" },
+    currentSort: { column: null, direction: null },
     onSort: () => undefined,
   },
 };
@@ -41,104 +50,85 @@ export const ActiveDescending: Story = {
   },
 };
 
-// Interactive table example
-const sampleData = [
-  { id: "1", name: "production-east", status: "Connected", nodes: 12, region: "us-east-1" },
-  { id: "2", name: "staging-west", status: "Connected", nodes: 6, region: "us-west-2" },
-  { id: "3", name: "dev-local", status: "Pending", nodes: 3, region: "local" },
-  { id: "4", name: "alpha-cluster", status: "Connected", nodes: 8, region: "eu-west-1" },
-];
+export const InactiveColumn: Story = {
+  args: {
+    column: "status",
+    label: "Status",
+    currentSort: { column: "name", direction: "asc" },
+    onSort: () => undefined,
+  },
+};
 
-type DataItem = typeof sampleData[number];
-
-function InteractiveTable() {
-  const { sortState, handleSort } = useSortState<DataItem>("name");
-
-  const sortedData = sortData(sampleData, sortState, {
-    name: (item) => item.name,
-    status: (item) => item.status,
-    nodes: (item) => item.nodes,
-    region: (item) => item.region,
-  });
-
-  return (
-    <div className="w-full max-w-2xl rounded-lg border border-card-border bg-card overflow-hidden">
+export const HeaderRow: Story = {
+  render: () => (
+    <div className="rounded-lg border border-card-border bg-card overflow-hidden">
       <table className="w-full">
         <thead>
-          <tr className="border-b border-card-border bg-card-hover">
+          <tr className="border-b border-card-border">
             <SortableHeader
               column="name"
-              label="Cluster Name"
-              currentSort={sortState}
-              onSort={handleSort}
+              label="Name"
+              currentSort={{ column: "name", direction: "asc" }}
+              onSort={() => undefined}
+            />
+            <SortableHeader
+              column="type"
+              label="Type"
+              currentSort={{ column: "name", direction: "asc" }}
+              onSort={() => undefined}
             />
             <SortableHeader
               column="status"
               label="Status"
-              currentSort={sortState}
-              onSort={handleSort}
+              currentSort={{ column: "name", direction: "asc" }}
+              onSort={() => undefined}
             />
             <SortableHeader
-              column="nodes"
-              label="Nodes"
-              currentSort={sortState}
-              onSort={handleSort}
-            />
-            <SortableHeader
-              column="region"
-              label="Region"
-              currentSort={sortState}
-              onSort={handleSort}
+              column="created"
+              label="Created"
+              currentSort={{ column: "name", direction: "asc" }}
+              onSort={() => undefined}
             />
           </tr>
         </thead>
-        <tbody className="divide-y divide-card-border">
-          {sortedData.map((item) => (
-            <tr key={item.id} className="hover:bg-card-hover transition-colors">
-              <td className="px-4 py-3 text-sm text-foreground font-medium">{item.name}</td>
-              <td className="px-4 py-3 text-sm text-foreground">{item.status}</td>
-              <td className="px-4 py-3 text-sm text-foreground">{item.nodes}</td>
-              <td className="px-4 py-3 text-sm text-muted">{item.region}</td>
-            </tr>
-          ))}
-        </tbody>
       </table>
+      <p className="p-4 text-sm text-muted">
+        Click any header to sort. The &quot;Name&quot; column is currently sorted ascending.
+      </p>
     </div>
-  );
-}
-
-export const InteractiveTableExample: Story = {
-  render: () => <InteractiveTable />,
+  ),
 };
 
-export const HeaderRow: Story = {
-  render: () => {
-    const [sortState, setSortState] = useState({ column: "name" as string | null, direction: "asc" as const });
-
-    const handleSort = (column: string) => {
-      setSortState(prev => {
-        if (prev.column === column) {
-          if (prev.direction === "asc") return { column, direction: "desc" as const };
-          return { column: null, direction: "asc" as const };
-        }
-        return { column, direction: "asc" as const };
-      });
-    };
-
-    return (
-      <div className="rounded-lg border border-card-border bg-card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-card-border">
-              <SortableHeader column="name" label="Name" currentSort={sortState} onSort={handleSort} />
-              <SortableHeader column="type" label="Type" currentSort={sortState} onSort={handleSort} />
-              <SortableHeader column="status" label="Status" currentSort={sortState} onSort={handleSort} />
-              <SortableHeader column="created" label="Created" currentSort={sortState} onSort={handleSort} />
-            </tr>
-          </thead>
-        </table>
-        <p className="p-4 text-sm text-muted">Click headers to sort. Current: {sortState.column ?? "none"} ({sortState.direction})</p>
+export const AllStates: Story = {
+  render: () => (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <span className="text-sm text-muted w-24">Unsorted:</span>
+        <SortableHeader
+          column="col1"
+          label="Column"
+          currentSort={{ column: null, direction: null }}
+          onSort={() => undefined}
+        />
       </div>
-    );
-  },
+      <div className="flex items-center gap-4">
+        <span className="text-sm text-muted w-24">Ascending:</span>
+        <SortableHeader
+          column="col2"
+          label="Column"
+          currentSort={{ column: "col2", direction: "asc" }}
+          onSort={() => undefined}
+        />
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="text-sm text-muted w-24">Descending:</span>
+        <SortableHeader
+          column="col3"
+          label="Column"
+          currentSort={{ column: "col3", direction: "desc" }}
+          onSort={() => undefined}
+        />
+      </div>
+    </div>
+  ),
 };
