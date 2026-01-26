@@ -69,7 +69,7 @@ export interface TestPolicy {
   name: string;
   description: string | null;
   type: "CILIUM_NETWORK" | "CILIUM_CLUSTERWIDE" | "TETRAGON" | "GATEWAY_HTTPROUTE" | "GATEWAY_GRPCROUTE" | "GATEWAY_TCPROUTE" | "GATEWAY_TLSROUTE";
-  status: "DRAFT" | "SIMULATING" | "PENDING" | "DEPLOYED" | "FAILED" | "ARCHIVED";
+  status: "DRAFT" | "SIMULATING" | "PENDING" | "DEPLOYED" | "UNDEPLOYING" | "FAILED" | "ARCHIVED";
   content: string;
   targetNamespaces: string[];
   clusterId: string;
@@ -96,7 +96,7 @@ export interface TestPolicyDeployment {
   versionId: string;
   clusterId: string;
   deployedById: string;
-  status: "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "ROLLED_BACK";
+  status: "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "ROLLED_BACK" | "UNDEPLOYING" | "UNDEPLOYED";
   resourceName: string | null;
   resourceNamespace: string | null;
   resourceVersion: string | null;

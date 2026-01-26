@@ -26,6 +26,7 @@ type PolicyStatus =
   | "SIMULATING"
   | "PENDING"
   | "DEPLOYED"
+  | "UNDEPLOYING"
   | "FAILED"
   | "ARCHIVED";
 
@@ -44,6 +45,7 @@ const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warnin
   SIMULATING: { variant: "accent", label: "Simulating" },
   PENDING: { variant: "warning", label: "Pending" },
   DEPLOYED: { variant: "success", label: "Deployed" },
+  UNDEPLOYING: { variant: "warning", label: "Undeploying" },
   FAILED: { variant: "danger", label: "Failed" },
   ARCHIVED: { variant: "muted", label: "Archived" },
 };
@@ -98,6 +100,14 @@ export default function PolicyDetailPage() {
 
   // Archive mutation
   const archiveMutation = trpc.policy.archive.useMutation({
+    onSuccess: () => {
+      void utils.policy.getById.invalidate({ id: policyId });
+      void utils.policy.list.invalidate();
+    },
+  });
+
+  // Undeploy mutation
+  const undeployMutation = trpc.policy.undeploy.useMutation({
     onSuccess: () => {
       void utils.policy.getById.invalidate({ id: policyId });
       void utils.policy.list.invalidate();
@@ -198,6 +208,12 @@ export default function PolicyDetailPage() {
 
   const handleArchive = () => {
     archiveMutation.mutate({ id: policyId });
+  };
+
+  const handleUndeploy = () => {
+    if (confirm("Are you sure you want to undeploy this policy? It will be removed from the cluster but remain in the system as a draft.")) {
+      undeployMutation.mutate({ id: policyId });
+    }
   };
 
   const handleRunSimulation = async () => {
@@ -329,12 +345,28 @@ export default function PolicyDetailPage() {
               </Button>
             )}
             {policy.status === "DEPLOYED" && (
-              <Button
-                variant="secondary"
-                onClick={handleArchive}
-                disabled={archiveMutation.isPending}
-              >
-                {archiveMutation.isPending ? "Archiving..." : "Archive Policy"}
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={handleUndeploy}
+                  disabled={undeployMutation.isPending}
+                  className="text-warning hover:text-warning"
+                >
+                  {undeployMutation.isPending ? "Undeploying..." : "Undeploy"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleArchive}
+                  disabled={archiveMutation.isPending}
+                >
+                  {archiveMutation.isPending ? "Archiving..." : "Archive Policy"}
+                </Button>
+              </>
+            )}
+            {policy.status === "UNDEPLOYING" && (
+              <Button variant="secondary" disabled>
+                <Spinner size="sm" variant="current" className="mr-2" />
+                Undeploying...
               </Button>
             )}
             <Button onClick={() => setIsEditModalOpen(true)}>Edit Policy</Button>
@@ -553,6 +585,10 @@ export default function PolicyDetailPage() {
                                   ? "accent"
                                   : deployment.status === "ROLLED_BACK"
                                   ? "warning"
+                                  : deployment.status === "UNDEPLOYING"
+                                  ? "warning"
+                                  : deployment.status === "UNDEPLOYED"
+                                  ? "muted"
                                   : "muted"
                               }
                             >

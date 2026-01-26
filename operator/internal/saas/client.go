@@ -242,6 +242,7 @@ type Policy struct {
 	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
 	Version          int      `json:"version"`
 	LastUpdated      string   `json:"lastUpdated"`
+	Action           string   `json:"action"` // "DEPLOY" or "UNDEPLOY"
 }
 
 // FetchPoliciesResponse is the response from fetching policies
@@ -326,6 +327,30 @@ func (c *Client) UpdatePolicyStatus(ctx context.Context, policyID string, req Up
 		"version", result.DeployedVersion)
 
 	return &result, nil
+}
+
+// ReportUndeployStatus reports the result of an undeploy operation
+func (c *Client) ReportUndeployStatus(ctx context.Context, policyID string, success bool, errorMsg string) error {
+	status := "UNDEPLOYED"
+	if !success {
+		status = "FAILED"
+	}
+
+	req := UpdatePolicyStatusRequest{
+		Status: status,
+		Error:  errorMsg,
+	}
+
+	_, err := c.UpdatePolicyStatus(ctx, policyID, req)
+	if err != nil {
+		return fmt.Errorf("failed to report undeploy status: %w", err)
+	}
+
+	c.log.Info("Reported undeploy status",
+		"policyId", policyID,
+		"success", success)
+
+	return nil
 }
 
 // FlowRecord represents a network flow record

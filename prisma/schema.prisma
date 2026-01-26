@@ -354,12 +354,13 @@ enum PolicyType {
 }
 
 enum PolicyStatus {
-  DRAFT      // Not yet deployed
-  SIMULATING // Running in simulation
-  PENDING    // Queued for deployment
-  DEPLOYED   // Active in cluster
-  FAILED     // Deployment failed
-  ARCHIVED   // No longer active
+  DRAFT       // Not yet deployed
+  SIMULATING  // Running in simulation
+  PENDING     // Queued for deployment
+  DEPLOYED    // Active in cluster
+  UNDEPLOYING // Being removed from cluster
+  FAILED      // Deployment failed
+  ARCHIVED    // No longer active
 }
 
 model PolicyVersion {
@@ -444,6 +445,8 @@ enum DeploymentStatus {
   SUCCEEDED   // Successfully deployed
   FAILED      // Deployment failed
   ROLLED_BACK // Was rolled back
+  UNDEPLOYING // Being removed from cluster
+  UNDEPLOYED  // Successfully removed from cluster
 }
 
 // ============================================================================

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	OperatorVersion = "1.0.0"
+	OperatorVersion = "1.1.0"
 
 	// Condition types
 	ConditionTypeRegistered = "Registered"
@@ -377,6 +377,13 @@ func (r *Reconciler) SyncPolicies(ctx context.Context) error {
 		saasIDs[saasPolicy.ID] = true
 
 		existing, found := existingByID[saasPolicy.ID]
+
+		// Handle UNDEPLOY action
+		if saasPolicy.Action == "UNDEPLOY" {
+			r.handleUndeploy(ctx, saasPolicy, existing)
+			continue
+		}
+
 		if found {
 			// Check if update needed
 			if existing.Spec.Version < saasPolicy.Version {
@@ -460,6 +467,45 @@ func (r *Reconciler) SyncPolicies(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// handleUndeploy removes a policy from the cluster and reports status back to SaaS
+func (r *Reconciler) handleUndeploy(ctx context.Context, saasPolicy saas.Policy, existing *policyv1alpha1.ManagedPolicy) {
+	log := r.log.WithValues("policy", saasPolicy.Name, "policyId", saasPolicy.ID)
+	log.Info("Processing undeploy request")
+
+	if existing == nil {
+		// Policy doesn't exist locally, report success
+		log.Info("Policy not found locally, reporting as undeployed")
+		if err := r.saasClient.ReportUndeployStatus(ctx, saasPolicy.ID, true, ""); err != nil {
+			log.Error(err, "Failed to report undeploy status")
+		}
+		return
+	}
+
+	// Delete deployed resources from cluster
+	if err := r.deployer.Delete(ctx, existing); err != nil {
+		log.Error(err, "Failed to delete policy resources")
+		if reportErr := r.saasClient.ReportUndeployStatus(ctx, saasPolicy.ID, false, err.Error()); reportErr != nil {
+			log.Error(reportErr, "Failed to report undeploy failure")
+		}
+		return
+	}
+
+	// Delete the ManagedPolicy CRD
+	if err := r.client.Delete(ctx, existing); err != nil && !errors.IsNotFound(err) {
+		log.Error(err, "Failed to delete ManagedPolicy")
+		if reportErr := r.saasClient.ReportUndeployStatus(ctx, saasPolicy.ID, false, err.Error()); reportErr != nil {
+			log.Error(reportErr, "Failed to report undeploy failure")
+		}
+		return
+	}
+
+	// Report success
+	log.Info("Successfully undeployed policy")
+	if err := r.saasClient.ReportUndeployStatus(ctx, saasPolicy.ID, true, ""); err != nil {
+		log.Error(err, "Failed to report undeploy success")
+	}
 }
 
 // ReconcilePolicy reconciles a single ManagedPolicy

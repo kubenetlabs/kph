@@ -24,11 +24,11 @@ export async function GET(request: NextRequest) {
   if (scopeError) return scopeError;
 
   try {
-    // Fetch policies that are PENDING or DEPLOYED for this cluster
+    // Fetch policies that are PENDING, DEPLOYED, or UNDEPLOYING for this cluster
     const policies = await db.policy.findMany({
       where: {
         clusterId: auth.clusterId,
-        status: { in: ["PENDING", "DEPLOYED"] },
+        status: { in: ["PENDING", "DEPLOYED", "UNDEPLOYING"] },
       },
       select: {
         id: true,
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Transform to operator-friendly format
+    // Transform to operator-friendly format with action field
     const operatorPolicies = policies.map((p) => ({
       id: p.id,
       name: p.name,
@@ -57,6 +57,8 @@ export async function GET(request: NextRequest) {
       targetNamespaces: p.targetNamespaces,
       version: p.deployedVersion ?? 1,
       lastUpdated: p.updatedAt.toISOString(),
+      // Action tells operator what to do: DEPLOY or UNDEPLOY
+      action: p.status === "UNDEPLOYING" ? "UNDEPLOY" : "DEPLOY",
     }));
 
     return NextResponse.json({

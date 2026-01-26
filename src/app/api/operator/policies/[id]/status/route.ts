@@ -9,7 +9,7 @@ import {
 } from "~/lib/api-auth";
 
 const statusUpdateSchema = z.object({
-  status: z.enum(["IN_PROGRESS", "DEPLOYED", "FAILED"]),
+  status: z.enum(["IN_PROGRESS", "DEPLOYED", "FAILED", "UNDEPLOYED"]),
   error: z.string().optional(),
   errorDetails: z
     .object({
@@ -112,6 +112,57 @@ export async function PATCH(
         policyId: policy.id,
         status: "IN_PROGRESS",
         deployedVersion: policy.deployedVersion,
+      });
+    }
+
+    // Handle UNDEPLOYED status - reset policy to DRAFT
+    if (status === "UNDEPLOYED") {
+      // Reset policy to DRAFT status
+      const updatedPolicy = await db.policy.update({
+        where: { id: policyId },
+        data: {
+          status: "DRAFT",
+          deployedAt: null,
+          deployedVersion: null,
+        },
+      });
+
+      // Update the UNDEPLOYING deployment record
+      const undeployingDeployment = await db.policyDeployment.findFirst({
+        where: {
+          policyId: policyId,
+          status: "UNDEPLOYING",
+        },
+        orderBy: { requestedAt: "desc" },
+      });
+
+      if (undeployingDeployment) {
+        await db.policyDeployment.update({
+          where: { id: undeployingDeployment.id },
+          data: {
+            status: "UNDEPLOYED",
+            completedAt: new Date(),
+            errorMessage: error ?? null,
+          },
+        });
+      }
+
+      // Create audit log entry
+      await db.auditLog.create({
+        data: {
+          action: "policy.undeployed",
+          resource: "Policy",
+          resourceId: policyId,
+          details: { previousVersion: policy.deployedVersion },
+          organizationId: auth.organizationId,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        policyId: updatedPolicy.id,
+        status: "DRAFT",
+        message: "Policy successfully undeployed and reset to draft",
       });
     }
 

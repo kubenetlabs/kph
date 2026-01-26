@@ -30,6 +30,7 @@ const PolicyStatusSchema = z.enum([
   "SIMULATING",
   "PENDING",
   "DEPLOYED",
+  "UNDEPLOYING",
   "FAILED",
   "ARCHIVED",
 ]);
@@ -529,6 +530,70 @@ export const policyRouter = createTRPCRouter({
       });
 
       return policy;
+    }),
+
+  // Undeploy a policy (remove from cluster, keep in SaaS as DRAFT)
+  undeploy: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Verify policy exists and belongs to org
+      const existing = await ctx.db.policy.findFirst({
+        where: {
+          id: input.id,
+          organizationId: ctx.organizationId,
+        },
+        include: {
+          versions: {
+            orderBy: { version: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Policy not found",
+        });
+      }
+
+      // Verify policy is currently deployed
+      if (existing.status !== "DEPLOYED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Policy is not deployed",
+        });
+      }
+
+      // Get latest version for deployment record
+      const latestVersion = existing.versions[0];
+      if (!latestVersion) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "No policy version found",
+        });
+      }
+
+      // Update policy status to UNDEPLOYING and create deployment record
+      const [policy, deployment] = await ctx.db.$transaction([
+        ctx.db.policy.update({
+          where: { id: input.id },
+          data: {
+            status: "UNDEPLOYING",
+          },
+        }),
+        ctx.db.policyDeployment.create({
+          data: {
+            policyId: input.id,
+            versionId: latestVersion.id,
+            clusterId: existing.clusterId,
+            status: "UNDEPLOYING",
+            deployedById: ctx.userId,
+          },
+        }),
+      ]);
+
+      return { policy, deploymentId: deployment.id };
     }),
 
   // Get validation status for Gateway API policies

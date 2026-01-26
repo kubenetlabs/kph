@@ -27,6 +27,7 @@ type PolicyStatus =
   | "SIMULATING"
   | "PENDING"
   | "DEPLOYED"
+  | "UNDEPLOYING"
   | "FAILED"
   | "ARCHIVED";
 
@@ -45,6 +46,7 @@ const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warnin
   SIMULATING: { variant: "accent", label: "Simulating" },
   PENDING: { variant: "warning", label: "Pending" },
   DEPLOYED: { variant: "success", label: "Deployed" },
+  UNDEPLOYING: { variant: "warning", label: "Undeploying" },
   FAILED: { variant: "danger", label: "Failed" },
   ARCHIVED: { variant: "muted", label: "Archived" },
 };
@@ -183,6 +185,14 @@ function PoliciesPageContent() {
 
   // Archive mutation
   const archiveMutation = trpc.policy.archive.useMutation({
+    onSuccess: () => {
+      void utils.policy.list.invalidate();
+      void utils.policy.getStats.invalidate();
+    },
+  });
+
+  // Undeploy mutation
+  const undeployMutation = trpc.policy.undeploy.useMutation({
     onSuccess: () => {
       void utils.policy.list.invalidate();
       void utils.policy.getStats.invalidate();
@@ -570,16 +580,37 @@ function PoliciesPageContent() {
                           </Button>
                         )}
                         {policy.status === "DEPLOYED" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleArchive(policy.id)}
-                            disabled={archiveMutation.isPending}
-                          >
-                            Archive
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm("Are you sure you want to undeploy this policy? It will be removed from the cluster but kept as a draft.")) {
+                                  undeployMutation.mutate({ id: policy.id });
+                                }
+                              }}
+                              disabled={undeployMutation.isPending}
+                              className="text-warning hover:text-warning"
+                            >
+                              Undeploy
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleArchive(policy.id)}
+                              disabled={archiveMutation.isPending}
+                            >
+                              Archive
+                            </Button>
+                          </>
                         )}
-                        {policy.status !== "DEPLOYED" && (
+                        {policy.status === "UNDEPLOYING" && (
+                          <span className="flex items-center gap-1 text-sm text-warning px-2">
+                            <Spinner size="sm" />
+                            Undeploying...
+                          </span>
+                        )}
+                        {policy.status !== "DEPLOYED" && policy.status !== "UNDEPLOYING" && (
                           <Button
                             variant="ghost"
                             size="sm"
