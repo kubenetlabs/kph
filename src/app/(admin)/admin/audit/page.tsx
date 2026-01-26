@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import { trpc } from "~/lib/trpc";
+import { ExportButton } from "~/components/ui/export-button";
+import type { ExportColumn } from "~/lib/csv-export";
 
 const actionConfig: Record<string, { variant: "success" | "warning" | "danger" | "muted" | "accent"; label: string }> = {
   "user.login": { variant: "muted", label: "Login" },
@@ -46,6 +48,29 @@ export default function AdminAuditPage() {
   const logs = logsData?.pages.flatMap((page) => page.logs) ?? [];
   const organizations = orgsData?.organizations ?? [];
 
+  // Flatten log data for CSV export
+  const exportData = useMemo(() => {
+    return logs.map((log) => ({
+      timestamp: new Date(log.timestamp).toISOString(),
+      action: log.action,
+      userName: log.user?.name ?? "System",
+      userEmail: log.user?.email ?? "",
+      organizationName: log.organization?.name ?? "",
+      resourceType: log.resourceType ?? "",
+      resource: log.resource ?? "",
+    }));
+  }, [logs]);
+
+  const auditExportColumns: ExportColumn<typeof exportData[number]>[] = [
+    { key: "timestamp", header: "Timestamp" },
+    { key: "action", header: "Action" },
+    { key: "userName", header: "User Name" },
+    { key: "userEmail", header: "User Email" },
+    { key: "organizationName", header: "Organization" },
+    { key: "resourceType", header: "Resource Type" },
+    { key: "resource", header: "Resource" },
+  ];
+
   const uniqueActions = Array.from(
     new Set(logs.map((log) => log.action))
   ).sort();
@@ -53,11 +78,19 @@ export default function AdminAuditPage() {
   return (
     <div>
       {/* Page Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Audit Logs</h1>
-        <p className="mt-1 text-muted">
-          View all platform activity and security events
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Audit Logs</h1>
+          <p className="mt-1 text-muted">
+            View all platform activity and security events
+          </p>
+        </div>
+        <ExportButton
+          data={exportData}
+          columns={auditExportColumns}
+          filename="audit-logs"
+          disabled={isLoading}
+        />
       </div>
 
       {/* Filters */}
