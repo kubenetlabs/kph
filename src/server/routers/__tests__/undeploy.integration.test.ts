@@ -102,11 +102,12 @@ describe("Undeploy Feature Integration Tests", () => {
       expect(response.status).toBe(200);
       expect(data.policies).toHaveLength(2);
 
-      const pendingPolicy = data.policies.find((p: { name: string }) => p.name === "pending-policy") as { action: string };
-      const deployedPolicy = data.policies.find((p: { name: string }) => p.name === "deployed-policy") as { action: string };
+      const policies = data.policies as Array<{ name: string; action: string }>;
+      const pendingPolicy = policies.find((p) => p.name === "pending-policy");
+      const deployedPolicy = policies.find((p) => p.name === "deployed-policy");
 
-      expect(pendingPolicy.action).toBe("DEPLOY");
-      expect(deployedPolicy.action).toBe("DEPLOY");
+      expect(pendingPolicy?.action).toBe("DEPLOY");
+      expect(deployedPolicy?.action).toBe("DEPLOY");
     });
 
     it("should not return DRAFT or ARCHIVED policies", async () => {
