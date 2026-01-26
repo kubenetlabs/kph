@@ -102,8 +102,8 @@ describe("Undeploy Feature Integration Tests", () => {
       expect(response.status).toBe(200);
       expect(data.policies).toHaveLength(2);
 
-      const pendingPolicy = data.policies.find((p: { name: string }) => p.name === "pending-policy");
-      const deployedPolicy = data.policies.find((p: { name: string }) => p.name === "deployed-policy");
+      const pendingPolicy = data.policies.find((p: { name: string }) => p.name === "pending-policy") as { action: string };
+      const deployedPolicy = data.policies.find((p: { name: string }) => p.name === "deployed-policy") as { action: string };
 
       expect(pendingPolicy.action).toBe("DEPLOY");
       expect(deployedPolicy.action).toBe("DEPLOY");
