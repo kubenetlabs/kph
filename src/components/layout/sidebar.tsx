@@ -149,7 +149,7 @@ export default function Sidebar() {
       </div>
 
       {/* Quick Search Hint */}
-      <div className="border-b border-card-border px-4 py-3">
+      <div className="border-b border-card-border px-4 py-3" data-tour="command-palette-hint">
         <button
           onClick={() => {
             const event = new KeyboardEvent("keydown", {
@@ -170,11 +170,12 @@ export default function Sidebar() {
       </div>
 
       {/* Main Navigation */}
-      <nav className="flex-1 space-y-1 px-2 py-4">
+      <nav className="flex-1 space-y-1 px-2 py-4" data-tour="sidebar-nav">
         {navigation.map((item) => (
           <Link
             key={item.name}
             href={item.href}
+            data-tour={`nav-${item.icon}`}
             className={cn(
               "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               isActive(item.href)
@@ -215,7 +216,7 @@ export default function Sidebar() {
       {/* Bottom Navigation */}
       <div className="border-t border-card-border px-2 py-4">
         {/* Theme Toggle */}
-        <div className="mb-2 flex items-center justify-between px-3">
+        <div className="mb-2 flex items-center justify-between px-3" data-tour="theme-toggle">
           <span className="text-xs font-medium text-muted">Theme</span>
           <ThemeSelect />
         </div>

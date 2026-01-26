@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import MetricCard from "~/components/dashboard/metric-card";
@@ -8,9 +9,11 @@ import { Card, CardContent } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import { trpc } from "~/lib/trpc";
+import { useTour, dashboardTourSteps, TOUR_IDS } from "~/components/guided-tour";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { startTour, hasCompletedTour, markTourComplete, isActive } = useTour();
 
   // Fetch real data from tRPC
   const { data: clusters } = trpc.cluster.list.useQuery();
@@ -25,14 +28,39 @@ export default function DashboardPage() {
   const connectedCount = clusterList.filter(c => c.status === "CONNECTED").length;
   const pendingCount = clusterList.filter(c => c.status === "PENDING").length;
 
+  // Auto-start tour for new users
+  useEffect(() => {
+    const tourId = TOUR_IDS.DASHBOARD;
+    if (!hasCompletedTour(tourId) && !isActive) {
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(() => {
+        startTour(dashboardTourSteps);
+        markTourComplete(tourId);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasCompletedTour, isActive, startTour, markTourComplete]);
+
+  const handleStartTour = () => {
+    startTour(dashboardTourSteps);
+  };
+
   return (
     <AppShell>
       {/* Page Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-muted">
-          Overview of your Kubernetes policy infrastructure
-        </p>
+      <div className="mb-8 flex items-start justify-between" data-tour="dashboard-header">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <p className="mt-1 text-muted">
+            Overview of your Kubernetes policy infrastructure
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={handleStartTour}>
+          <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Take a Tour
+        </Button>
       </div>
 
       {/* Metrics Grid */}
