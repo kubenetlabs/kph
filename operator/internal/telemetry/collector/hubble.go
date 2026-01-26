@@ -237,6 +237,10 @@ func (h *HubbleClient) flowToEvent(flow *flowpb.Flow) *models.TelemetryEvent {
 		event.SrcPodName = src.GetPodName()
 		event.SrcPodLabels = labelsSliceToMap(src.GetLabels())
 		event.SrcIdentity = src.GetIdentity()
+		// Fallback: extract namespace from labels if endpoint namespace is empty
+		if event.SrcNamespace == "" {
+			event.SrcNamespace = extractNamespaceFromLabels(src.GetLabels())
+		}
 	}
 
 	// Extract destination endpoint info
@@ -245,6 +249,10 @@ func (h *HubbleClient) flowToEvent(flow *flowpb.Flow) *models.TelemetryEvent {
 		event.DstPodName = dst.GetPodName()
 		event.DstPodLabels = labelsSliceToMap(dst.GetLabels())
 		event.DstIdentity = dst.GetIdentity()
+		// Fallback: extract namespace from labels if endpoint namespace is empty
+		if event.DstNamespace == "" {
+			event.DstNamespace = extractNamespaceFromLabels(dst.GetLabels())
+		}
 	}
 
 	// Extract IP information
@@ -402,6 +410,19 @@ func stripCiliumLabelPrefix(key string) string {
 		}
 	}
 	return key
+}
+
+// extractNamespaceFromLabels extracts namespace from Cilium labels.
+// Hubble labels include "k8s:io.kubernetes.pod.namespace=<namespace>"
+// which we use as a fallback when GetNamespace() returns empty.
+func extractNamespaceFromLabels(labels []string) string {
+	const nsLabelPrefix = "k8s:io.kubernetes.pod.namespace="
+	for _, label := range labels {
+		if strings.HasPrefix(label, nsLabelPrefix) {
+			return label[len(nsLabelPrefix):]
+		}
+	}
+	return ""
 }
 
 // formatTCPFlags formats TCP flags as a readable string.
