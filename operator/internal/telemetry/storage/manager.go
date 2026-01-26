@@ -253,6 +253,7 @@ func (m *Manager) Query(ctx context.Context, req models.QueryEventsRequest) (*mo
 	m.log.Info("Query: starting index lookup",
 		"startTime", req.StartTime,
 		"endTime", req.EndTime,
+		"namespaces", req.Namespaces,
 	)
 
 	// First try to use index to find relevant files
@@ -266,6 +267,15 @@ func (m *Manager) Query(ctx context.Context, req models.QueryEventsRequest) (*mo
 	m.log.Info("Query: index lookup complete", "fileCount", len(files))
 
 	if len(files) == 0 {
+		// If we have a namespace filter and the index returned no files,
+		// fall back to full parquet scan. The 10% sampling may have missed
+		// events for this specific namespace.
+		if len(req.Namespaces) > 0 {
+			m.log.Info("Query: no indexed files for namespace filter, falling back to full scan",
+				"namespaces", req.Namespaces,
+			)
+			return m.reader.ReadEvents(ctx, req)
+		}
 		m.log.Info("Query: no matching files found")
 		return &models.QueryEventsResponse{
 			Events:     nil,
