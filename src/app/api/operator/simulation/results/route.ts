@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { db } from "~/lib/db";
 import {
   authenticateOperatorToken,
@@ -298,13 +299,13 @@ export async function POST(request: NextRequest) {
         data: {
           status,
           completedAt: new Date(),
-          processedNodes: updatedProcessedNodes as unknown as string[],
-          nodeResults: updatedNodeResults as unknown as Record<string, unknown>,
+          processedNodes: updatedProcessedNodes as unknown as Prisma.InputJsonValue,
+          nodeResults: updatedNodeResults as unknown as Prisma.InputJsonValue,
           flowsAnalyzed: aggregated.flowsAnalyzed,
           flowsAllowed: aggregated.flowsAllowed,
           flowsDenied: aggregated.flowsDenied,
           flowsChanged: aggregated.flowsChanged,
-          results: aggregated.aggregatedResults as unknown as Record<string, unknown>,
+          results: aggregated.aggregatedResults as unknown as Prisma.InputJsonValue,
         },
       });
 
@@ -320,8 +321,8 @@ export async function POST(request: NextRequest) {
       await db.simulation.update({
         where: { id: data.simulationId },
         data: {
-          processedNodes: updatedProcessedNodes as unknown as string[],
-          nodeResults: updatedNodeResults as unknown as Record<string, unknown>,
+          processedNodes: updatedProcessedNodes as unknown as Prisma.InputJsonValue,
+          nodeResults: updatedNodeResults as unknown as Prisma.InputJsonValue,
         },
       });
 
