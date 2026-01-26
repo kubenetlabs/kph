@@ -92,12 +92,18 @@ export const invitationRouter = createTRPCRouter({
       // Generate invitation ID upfront so email link matches DB record
       const invitationId = createId();
 
+      // Get inviter's name for the email
+      const inviter = await ctx.db.user.findUnique({
+        where: { id: ctx.userId },
+        select: { name: true, email: true },
+      });
+
       // Send invitation email FIRST - if this fails, no DB record is created
       try {
         await sendInvitationEmail({
           to: input.email.toLowerCase(),
           organizationName: organization.name,
-          inviterName: ctx.user.name ?? ctx.user.email,
+          inviterName: inviter?.name ?? inviter?.email ?? ctx.user.email,
           role: input.role,
           invitationId,
           expiresAt,
