@@ -80,7 +80,20 @@ export function TopologyMap({
 
   const handleEdgeClick = useCallback(
     (_: React.MouseEvent, edge: Edge) => {
-      setSelectedEdge(edge.id);
+      // Pass full edge data to store for use in DetailPanel
+      const edgeData = edge.data as { verdict: string; flowCount: number; allowedCount: number; deniedCount: number; protocol: string; port: number } | undefined;
+      setSelectedEdge(edge.id, edgeData ? {
+        source: edge.source,
+        target: edge.target,
+        data: {
+          verdict: edgeData.verdict as "allowed" | "denied" | "no-policy",
+          flowCount: edgeData.flowCount,
+          allowedCount: edgeData.allowedCount,
+          deniedCount: edgeData.deniedCount,
+          protocol: edgeData.protocol,
+          port: edgeData.port,
+        }
+      } : undefined);
       onEdgeClick?.(edge.id);
     },
     [setSelectedEdge, onEdgeClick]

@@ -52,6 +52,15 @@ interface FormErrors {
   targetNamespaces?: string;
 }
 
+interface FlowPreFill {
+  srcNamespace: string;
+  srcPod: string;
+  dstNamespace: string;
+  dstPod: string;
+  port: number;
+  protocol: string;
+}
+
 interface PolicyFormProps {
   initialData?: {
     id?: string;
@@ -73,6 +82,55 @@ interface PolicyFormProps {
   onCancel: () => void;
   isLoading?: boolean;
   mode: "create" | "edit";
+  flowPreFill?: FlowPreFill;
+}
+
+/**
+ * Generate a Cilium Network Policy YAML from flow data
+ */
+function generatePolicyFromFlow(flow: FlowPreFill): { name: string; description: string; content: string; targetNamespace: string } {
+  // Extract workload name from pod name (remove replica suffix like -7d4f8b9c5d-x2b4k)
+  const extractWorkloadName = (podName: string): string => {
+    // Common k8s patterns: deployment-hash-random, statefulset-ordinal
+    const parts = podName.split("-");
+    // Remove the last 2 parts if they look like hash-random (e.g., abc123-x2b4k)
+    if (parts.length >= 3 && /^[a-z0-9]{5,}$/i.test(parts[parts.length - 1] ?? "")) {
+      return parts.slice(0, -2).join("-") || podName;
+    }
+    return podName;
+  };
+
+  const srcWorkload = extractWorkloadName(flow.srcPod);
+  const dstWorkload = extractWorkloadName(flow.dstPod);
+
+  const policyName = `allow-${srcWorkload}-to-${dstWorkload}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 63);
+
+  const content = `apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "${policyName}"
+  namespace: "${flow.dstNamespace}"
+spec:
+  description: "Allow traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload}"
+  endpointSelector:
+    matchLabels:
+      app: ${dstWorkload}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ${srcWorkload}
+            "k8s:io.kubernetes.pod.namespace": ${flow.srcNamespace}
+      toPorts:
+        - ports:
+            - port: "${flow.port}"
+              protocol: ${flow.protocol.toUpperCase()}`;
+
+  return {
+    name: policyName,
+    description: `Allow ${flow.protocol.toUpperCase()} traffic from ${flow.srcNamespace}/${srcWorkload} to ${flow.dstNamespace}/${dstWorkload} on port ${flow.port}`,
+    content,
+    targetNamespace: flow.dstNamespace,
+  };
 }
 
 const policyTypeOptions = [
@@ -199,14 +257,18 @@ export default function PolicyForm({
   onCancel,
   isLoading = false,
   mode,
+  flowPreFill,
 }: PolicyFormProps) {
+  // Generate pre-filled data from flow if provided
+  const flowGenerated = flowPreFill ? generatePolicyFromFlow(flowPreFill) : null;
+
   const [formData, setFormData] = useState<Partial<PolicyFormData>>({
-    name: initialData?.name ?? "",
-    description: initialData?.description ?? "",
-    type: initialData?.type as PolicyFormData["type"] | undefined,
+    name: initialData?.name ?? flowGenerated?.name ?? "",
+    description: initialData?.description ?? flowGenerated?.description ?? "",
+    type: (initialData?.type as PolicyFormData["type"]) ?? (flowGenerated ? "CILIUM_NETWORK" : undefined),
     clusterId: initialData?.clusterId ?? "",
-    content: initialData?.content ?? "",
-    targetNamespaces: initialData?.targetNamespaces?.join(", ") ?? "",
+    content: initialData?.content ?? flowGenerated?.content ?? "",
+    targetNamespaces: initialData?.targetNamespaces?.join(", ") ?? flowGenerated?.targetNamespace ?? "",
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -246,15 +308,15 @@ export default function PolicyForm({
     setErrors((prev) => ({ ...prev, [field]: error }));
   };
 
-  // Auto-populate template when type changes
+  // Auto-populate template when type changes (but not if we have flow pre-fill data)
   useEffect(() => {
-    if (mode === "create" && formData.type && !formData.content) {
+    if (mode === "create" && formData.type && !formData.content && !flowPreFill) {
       const template = policyTemplates[formData.type];
       if (template) {
         setFormData((prev) => ({ ...prev, content: template }));
       }
     }
-  }, [formData.type, formData.content, mode]);
+  }, [formData.type, formData.content, mode, flowPreFill]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

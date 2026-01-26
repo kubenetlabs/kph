@@ -14,6 +14,16 @@ export type TopologyFilters = {
   };
 };
 
+// Type for the edge data structure from topology router
+export type FlowEdgeData = {
+  verdict: "allowed" | "denied" | "no-policy";
+  flowCount: number;
+  allowedCount: number;
+  deniedCount: number;
+  protocol: string;
+  port: number;
+};
+
 export type TopologyState = {
   // Current mode
   mode: TopologyMode;
@@ -22,8 +32,9 @@ export type TopologyState = {
   // Selected elements
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  selectedEdgeData: { source: string; target: string; data: FlowEdgeData } | null;
   setSelectedNode: (nodeId: string | null) => void;
-  setSelectedEdge: (edgeId: string | null) => void;
+  setSelectedEdge: (edgeId: string | null, edgeData?: { source: string; target: string; data: FlowEdgeData }) => void;
 
   // Filters
   filters: TopologyFilters;
@@ -54,8 +65,14 @@ export const useTopologyStore = create<TopologyState>((set) => ({
   // Selected elements
   selectedNodeId: null,
   selectedEdgeId: null,
-  setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId, selectedEdgeId: null, detailPanelOpen: !!nodeId }),
-  setSelectedEdge: (edgeId) => set({ selectedEdgeId: edgeId, selectedNodeId: null, detailPanelOpen: !!edgeId }),
+  selectedEdgeData: null,
+  setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId, selectedEdgeId: null, selectedEdgeData: null, detailPanelOpen: !!nodeId }),
+  setSelectedEdge: (edgeId, edgeData) => set({
+    selectedEdgeId: edgeId,
+    selectedEdgeData: edgeData ?? null,
+    selectedNodeId: null,
+    detailPanelOpen: !!edgeId
+  }),
 
   // Filters
   filters: defaultFilters,

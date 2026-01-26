@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import AppShell from "~/components/layout/app-shell";
 import { Card } from "~/components/ui/card";
 import Button from "~/components/ui/button";
@@ -50,10 +51,26 @@ const statusConfig: Record<PolicyStatus, { variant: "muted" | "accent" | "warnin
 
 const PAGE_SIZE = 12;
 
+// Type for pre-filled flow data from topology page
+type FlowPreFill = {
+  srcNamespace: string;
+  srcPod: string;
+  dstNamespace: string;
+  dstPod: string;
+  port: number;
+  protocol: string;
+};
+
 export default function PoliciesPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [filterType, setFilterType] = useState<PolicyType | "">("");
   const [filterStatus, setFilterStatus] = useState<PolicyStatus | "">("");
+
+  // Pre-fill data from topology page flow selection
+  const [flowPreFill, setFlowPreFill] = useState<FlowPreFill | null>(null);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -64,6 +81,40 @@ export default function PoliciesPage() {
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
 
   const utils = trpc.useUtils();
+
+  // Handle URL params from topology page
+  useEffect(() => {
+    const action = searchParams.get("action");
+    const namespace = searchParams.get("namespace");
+
+    // If namespace filter is provided, apply it as a search
+    if (namespace) {
+      setSearchQuery(namespace);
+    }
+
+    // If action=create, open modal with pre-filled data
+    if (action === "create") {
+      const srcNamespace = searchParams.get("srcNamespace") ?? "";
+      const srcPod = searchParams.get("srcPod") ?? "";
+      const dstNamespace = searchParams.get("dstNamespace") ?? "";
+      const dstPod = searchParams.get("dstPod") ?? "";
+      const port = parseInt(searchParams.get("port") ?? "0", 10);
+      const protocol = searchParams.get("protocol") ?? "tcp";
+
+      setFlowPreFill({
+        srcNamespace,
+        srcPod,
+        dstNamespace,
+        dstPod,
+        port,
+        protocol,
+      });
+      setIsCreateModalOpen(true);
+
+      // Clear URL params after reading
+      router.replace("/policies");
+    }
+  }, [searchParams, router]);
 
   // Get the cursor for the current page
   const currentCursor = cursors[page - 1];
@@ -552,16 +603,25 @@ export default function PoliciesPage() {
       {/* Create Policy Modal */}
       <Modal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setFlowPreFill(null);
+        }}
         title="Create New Policy"
-        description="Define a new network, runtime, or ingress policy"
+        description={flowPreFill
+          ? `Allow traffic from ${flowPreFill.srcNamespace}/${flowPreFill.srcPod} to ${flowPreFill.dstNamespace}/${flowPreFill.dstPod}`
+          : "Define a new network, runtime, or ingress policy"}
         size="2xl"
       >
         <PolicyForm
           mode="create"
           onSubmit={handleCreatePolicy}
-          onCancel={() => setIsCreateModalOpen(false)}
+          onCancel={() => {
+            setIsCreateModalOpen(false);
+            setFlowPreFill(null);
+          }}
           isLoading={createMutation.isPending}
+          flowPreFill={flowPreFill ?? undefined}
         />
         {createMutation.error && (
           <p className="mt-4 text-sm text-danger">
