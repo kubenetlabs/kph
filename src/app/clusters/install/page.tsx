@@ -7,12 +7,12 @@ import { trpc } from "~/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 
-const EXPIRY_OPTIONS = [
+const EXPIRY_OPTIONS: readonly { value: number; label: string; recommended?: boolean }[] = [
   { value: 7, label: "7 days" },
   { value: 30, label: "30 days" },
   { value: 60, label: "60 days" },
   { value: 90, label: "90 days (Recommended)", recommended: true },
-] as const;
+];
 
 export default function InstallTestPage() {
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
