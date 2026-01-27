@@ -64,11 +64,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Update cluster with heartbeat data
+    // Mark operatorInstalled: true since receiving a heartbeat proves operator is running
     const cluster = await db.cluster.update({
       where: { id: auth.clusterId },
       data: {
         lastHeartbeat: new Date(),
         status: clusterStatus,
+        operatorInstalled: true,
         ...(data.operatorVersion && { operatorVersion: data.operatorVersion }),
         ...(data.kubernetesVersion && {
           kubernetesVersion: data.kubernetesVersion,
@@ -83,6 +85,9 @@ export async function POST(request: NextRequest) {
         name: true,
         status: true,
         lastHeartbeat: true,
+        operatorInstalled: true,
+        operatorId: true,
+        operatorVersion: true,
       },
     });
 
@@ -128,6 +133,10 @@ export async function POST(request: NextRequest) {
       success: true,
       clusterId: cluster.id,
       clusterStatus: cluster.status,
+      // Operator status - confirms operator is registered and running
+      operatorInstalled: cluster.operatorInstalled,
+      operatorId: cluster.operatorId,
+      operatorVersion: cluster.operatorVersion,
       pendingPoliciesCount: pendingPolicies,
       nextHeartbeat: 60, // seconds until next expected heartbeat
       // Token expiry warning (included when token expires within 14 days)
