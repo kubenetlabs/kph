@@ -9,12 +9,21 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   saasEndpoint: {{ .Values.agent.serverUrl | quote }}
+  {{- if .Values.agent.clusterId }}
+  # Legacy mode: Use pre-registered cluster from SaaS
   clusterIdSecretRef:
     name: kph-agent-config
     key: cluster-id
   apiTokenSecretRef:
     name: {{ .Values.agent.existingSecret | default "kph-agent-token" }}
     key: api-token
+  {{- else }}
+  # Bootstrap mode: Self-register with SaaS using registration token
+  clusterName: {{ required "agent.clusterName is required when agent.clusterId is not set" .Values.agent.clusterName | quote }}
+  registrationTokenSecretRef:
+    name: {{ .Values.agent.existingSecret | default "kph-agent-token" }}
+    key: api-token
+  {{- end }}
   syncInterval: {{ printf "%ds" (int .Values.agent.syncInterval) | quote }}
   heartbeatInterval: {{ printf "%ds" (int .Values.agent.heartbeatInterval) | quote }}
   {{- if .Values.cluster.provider }}

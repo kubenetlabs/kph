@@ -20,17 +20,58 @@ global:
 
 # Agent configuration (required)
 agent:
-  # Cluster identification - provided by KPH SaaS
-  clusterId: ""
+  # ============================================================================
+  # REGISTRATION MODE - Choose ONE of the following two options:
+  # ============================================================================
+  #
+  # OPTION 1: Bootstrap Mode (RECOMMENDED for new clusters)
+  # --------------------------------------------------------
+  # The operator will self-register with the SaaS and create the cluster record.
+  # Requires a REGISTRATION TOKEN from: SaaS Dashboard > Clusters > Registration Tokens
+  #
+  # Set: clusterName (required), leave clusterId empty
+  # Token type: Registration token (kph_agent_* prefix, org-scoped)
+  #
+  # Example:
+  #   agent:
+  #     clusterName: "my-production-cluster"
+  #     existingSecret: "kph-registration-token"  # Contains registration token
+  #
+  # OPTION 2: Legacy Mode (for pre-registered clusters)
+  # ----------------------------------------------------
+  # Use when the cluster was already created in the SaaS dashboard.
+  # Requires an API TOKEN from: SaaS Dashboard > Clusters > [Your Cluster] > Tokens
+  #
+  # Set: clusterId (required), clusterName is optional
+  # Token type: API token (cluster-scoped)
+  #
+  # Example:
+  #   agent:
+  #     clusterId: "cls_abc123xyz"
+  #     existingSecret: "kph-api-token"  # Contains cluster API token
+  #
+  # ============================================================================
+
+  # For Bootstrap mode: Name for your cluster (must be unique within your org)
+  # For Legacy mode: Leave empty or set for display purposes
   clusterName: ""
+
+  # For Legacy mode only: Cluster ID from SaaS dashboard (e.g., "cls_abc123")
+  # Leave empty to use Bootstrap mode
+  clusterId: ""
+
+  # Organization ID (optional, for reference only)
   organizationId: ""
 
   # Authentication token from KPH SaaS
-  # Option 1: Provide token directly (less secure - visible in shell history)
+  # Option A: Provide token directly (less secure - visible in shell history)
   token: ""
 
-  # Option 2: Use an existing secret (recommended for security)
-  # Create the secret first: kubectl create secret generic kph-agent-token --from-literal=api-token=YOUR_TOKEN
+  # Option B: Use an existing secret (RECOMMENDED for security)
+  # Create the secret first:
+  #   kubectl create secret generic kph-agent-token \
+  #     --namespace kph-system \
+  #     --from-literal=api-token=YOUR_TOKEN
   # Then set existingSecret to the secret name
   existingSecret: ""
 
