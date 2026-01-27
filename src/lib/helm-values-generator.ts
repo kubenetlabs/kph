@@ -130,7 +130,7 @@ export function generateHelmCommand(config: HelmValuesConfig): string {
   const command = [
     "helm install",
     releaseName,
-    "oci://409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent --version 0.1.3",
+    "oci://409239147779.dkr.ecr.us-east-1.amazonaws.com/kph/kph-agent --version 0.1.6",
     `--namespace ${namespace}`,
     "--create-namespace",
     `--set agent.clusterId=${config.clusterId}`,
