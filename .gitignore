@@ -46,3 +46,4 @@ operator/collector
 
 *storybook.log
 storybook-static
+.env.neon-backup
