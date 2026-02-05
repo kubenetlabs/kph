@@ -1,6 +1,19 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy-initialize Resend client to avoid build-time errors when API key is not set
+let _resend: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (_resend) return _resend;
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+
+  _resend = new Resend(apiKey);
+  return _resend;
+}
 
 // Get base URL for invitation links
 function getBaseUrl(): string {
@@ -37,6 +50,15 @@ export async function sendInvitationEmail({
   invitationId,
   expiresAt,
 }: SendInvitationEmailParams): Promise<void> {
+  const resend = getResendClient();
+
+  // If email is not configured, log and skip
+  if (!resend) {
+    console.log(`[email] Email not configured (RESEND_API_KEY not set). Would send invitation to: ${to}`);
+    console.log(`[email] Invitation ID: ${invitationId}, Organization: ${organizationName}, Role: ${role}`);
+    return;
+  }
+
   const baseUrl = getBaseUrl();
   const inviteUrl = `${baseUrl}/invite/${invitationId}`;
   const roleDisplay = roleDisplayNames[role] ?? role;
