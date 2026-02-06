@@ -55,4 +55,63 @@ Kubernetes Policy Hub has been deployed!
    LLM integration is disabled.
 {{- end }}
 
-For more information, visit: https://github.com/your-org/kubernetes-policy-hub
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICATION STEPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run these commands to verify successful installation:
+
+1. Check pod status:
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+   Expected: All pods in "Running" state
+
+2. Wait for pods to be ready (takes 1-2 minutes):
+   kubectl wait --for=condition=ready pod \
+     -l app.kubernetes.io/instance={{ .Release.Name }} \
+     -n {{ .Release.Namespace }} \
+     --timeout=300s
+
+   Expected: All pods report "condition met"
+
+{{- if .Values.database.embedded.enabled }}
+3. Verify database is healthy:
+   kubectl exec -n {{ .Release.Namespace }} \
+     deploy/{{ include "kph.fullname" . }}-db -- \
+     pg_isready -U {{ .Values.database.embedded.auth.username }}
+
+   Expected: "accepting connections"
+{{- end }}
+
+4. Check application health:
+   kubectl exec -n {{ .Release.Namespace }} \
+     deploy/{{ include "kph.fullname" . }} -- \
+     wget -qO- http://localhost:3000/api/health
+
+   Expected: {"status":"ok", ...}
+
+5. Run Helm tests:
+   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+   Expected: Test pods succeed
+
+6. View logs if there are issues:
+   kubectl logs -n {{ .Release.Namespace }} \
+     deploy/{{ include "kph.fullname" . }} \
+     --tail=50
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXPECTED TIMING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.database.embedded.enabled }}
+- Database ready: ~30-45 seconds
+{{- end }}
+- Application ready: ~60-90 seconds
+- Total install time: ~2-3 minutes
+
+If pods are not ready after 5 minutes, check logs for errors.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For more information, visit: https://github.com/kubenetlabs/kph
