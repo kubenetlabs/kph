@@ -137,31 +137,37 @@ spec:
             {{- end }}
             {{- end }}
 
-            # Encryption key
-            {{- if or .Values.security.encryptionKey .Values.security.existingSecret }}
+            # Encryption key (always set)
             - name: ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.security.existingSecret | default (printf "%s-security" (include "kph.fullname" .)) }}
                   key: {{ .Values.security.encryptionKeyKey | default "encryption-key" }}
-            {{- end }}
 
             # Extra env vars
             {{- with .Values.app.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
 
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: http
-            initialDelaySeconds: 30
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5
