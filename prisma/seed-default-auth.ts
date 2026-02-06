@@ -33,22 +33,17 @@ async function seedDefaultAuth() {
     });
     console.log(`[seed] Organization: "${org.name}" (${org.id})`);
 
-    // Check if subscription exists
-    const existingSub = await prisma.subscription.findUnique({
+    // Upsert subscription (idempotent - safe for multi-replica starts)
+    await prisma.subscription.upsert({
       where: { organizationId: DEFAULT_ORG_ID },
+      update: {}, // Don't overwrite if it exists
+      create: {
+        organizationId: DEFAULT_ORG_ID,
+        tier: "FREE",
+        status: "ACTIVE",
+      },
     });
-
-    if (!existingSub) {
-      // Create a free subscription for the org
-      await prisma.subscription.create({
-        data: {
-          organizationId: DEFAULT_ORG_ID,
-          tier: "FREE",
-          status: "ACTIVE",
-        },
-      });
-      console.log(`[seed] Created FREE subscription for organization`);
-    }
+    console.log(`[seed] Subscription: FREE tier for organization`);
 
     // Upsert default admin user
     const user = await prisma.user.upsert({
@@ -67,12 +62,20 @@ async function seedDefaultAuth() {
     });
     console.log(`[seed] Admin user: "${user.name}" <${user.email}> (${user.id})`);
 
-    console.log("[seed] Default auth seed complete.");
+    console.log("[seed] ✓ Default auth seed complete.");
   } catch (error) {
-    // Log but don't crash - the app can still work if this fails
-    // The NoAuthProvider will show a warning if the user is missing
-    console.error("[seed] Warning: Default auth seed failed:", error);
-    throw error;
+    // In multi-replica environments, concurrent upserts may occasionally conflict
+    // This is expected and safe - one pod will succeed, others can proceed
+    if (error instanceof Error) {
+      console.error("[seed] Warning: Seed operation failed:", error.message);
+      // Check if it's a database connection error (should retry) vs conflict (can ignore)
+      if (error.message.includes("connection") || error.message.includes("timeout")) {
+        console.error("[seed] Database connection issue - will retry on pod restart");
+        throw error; // Fatal: database not ready
+      }
+      // For other errors (likely constraint conflicts from race conditions), log and continue
+      console.log("[seed] Continuing startup - NoAuthProvider will verify default user exists");
+    }
   }
 }
 

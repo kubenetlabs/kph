@@ -1,0 +1,82 @@
+{{- if .Values.app.autoMigrate }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kph.fullname" . }}-migrate
+  labels:
+    {{- include "kph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "kph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "kph.app.image" . }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "KPH Database Migration"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+              echo "→ Waiting for database to be ready..."
+              until node node_modules/prisma/build/index.js db execute --stdin <<< "SELECT 1" 2>/dev/null; do
+                echo "  Database not ready, retrying in 2s..."
+                sleep 2
+              done
+              echo "✓ Database is ready"
+
+              echo ""
+              echo "→ Running migrations..."
+              node node_modules/prisma/build/index.js migrate deploy
+              echo "✓ Migrations completed successfully"
+
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          env:
+            # Database connection
+            {{- if .Values.database.external.enabled }}
+            {{- if .Values.database.external.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.existingSecret }}
+                  key: {{ .Values.database.external.urlKey | default "database-url" }}
+            {{- else if .Values.database.external.url }}
+            - name: DATABASE_URL
+              value: {{ .Values.database.external.url | quote }}
+            {{- end }}
+            {{- else if .Values.database.embedded.enabled }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.databaseSecretName" . }}
+                  key: {{ .Values.database.embedded.auth.passwordKey | default "postgres-password" }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.database.embedded.auth.username }}:$(DATABASE_PASSWORD)@{{ include "kph.fullname" . }}-db:5432/{{ .Values.database.embedded.auth.database }}?sslmode=disable"
+            {{- end }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+{{- end }}

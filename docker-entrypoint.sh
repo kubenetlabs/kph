@@ -46,8 +46,12 @@ if [ "$AUTH_PROVIDER" = "none" ]; then
   echo ""
 
   # Seed default org and admin user for no-auth mode
+  # This is idempotent and safe for multi-replica deployments
   echo "[entrypoint] Seeding default organization and admin user..."
-  node --import tsx prisma/seed-default-auth.ts || echo "[entrypoint] Warning: Seed script failed (may already be seeded)"
+  node --import tsx prisma/seed-default-auth.ts || {
+    echo "[entrypoint] Warning: Seed script encountered an error"
+    echo "[entrypoint] This is expected in multi-replica starts - one pod will succeed"
+  }
   echo ""
 else
   echo "[entrypoint] Auth provider: $AUTH_PROVIDER"
