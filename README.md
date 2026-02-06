@@ -177,4 +177,4 @@ See `prisma/schema.prisma` for full details.
 
 ## License
 
-APACHE
+Apache-2.0
