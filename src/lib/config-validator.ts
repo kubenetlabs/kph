@@ -9,6 +9,7 @@ interface ValidationError {
   field: string;
   message: string;
   fix: string;
+  docs?: string;
 }
 
 /**
@@ -29,6 +30,7 @@ export async function validateConfig(): Promise<void> {
         field: 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
         message: 'Clerk publishable key is required when using Clerk authentication',
         fix: 'Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/auth-clerk.md',
       });
     }
     if (!process.env.CLERK_SECRET_KEY) {
@@ -36,6 +38,7 @@ export async function validateConfig(): Promise<void> {
         field: 'CLERK_SECRET_KEY',
         message: 'Clerk secret key is required when using Clerk authentication',
         fix: 'Set CLERK_SECRET_KEY environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/auth-clerk.md',
       });
     }
   } else if (authProvider === 'oidc') {
@@ -43,7 +46,8 @@ export async function validateConfig(): Promise<void> {
       errors.push({
         field: 'KPH_OIDC_ISSUER_URL',
         message: 'OIDC issuer URL is required when using OIDC authentication',
-        fix: 'Set KPH_OIDC_ISSUER_URL environment variable',
+        fix: 'Set KPH_OIDC_ISSUER_URL environment variable (e.g., https://auth.example.com)',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/auth-oidc.md',
       });
     }
     if (!process.env.KPH_OIDC_CLIENT_ID) {
@@ -51,6 +55,7 @@ export async function validateConfig(): Promise<void> {
         field: 'KPH_OIDC_CLIENT_ID',
         message: 'OIDC client ID is required when using OIDC authentication',
         fix: 'Set KPH_OIDC_CLIENT_ID environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/auth-oidc.md',
       });
     }
     if (!process.env.KPH_OIDC_CLIENT_SECRET) {
@@ -58,6 +63,7 @@ export async function validateConfig(): Promise<void> {
         field: 'KPH_OIDC_CLIENT_SECRET',
         message: 'OIDC client secret is required when using OIDC authentication',
         fix: 'Set KPH_OIDC_CLIENT_SECRET environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/auth-oidc.md',
       });
     }
   }
@@ -71,18 +77,21 @@ export async function validateConfig(): Promise<void> {
         field: 'KPH_LLM_API_KEY',
         message: 'API key is required for Anthropic LLM provider',
         fix: 'Set KPH_LLM_API_KEY or ANTHROPIC_API_KEY environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/byom-llm-setup.md#anthropic',
       });
     } else if (llmProvider === 'openai' && !llmApiKey) {
       errors.push({
         field: 'KPH_LLM_API_KEY',
         message: 'API key is required for OpenAI LLM provider',
         fix: 'Set KPH_LLM_API_KEY environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/byom-llm-setup.md#openai',
       });
     } else if (llmProvider === 'openai-compatible' && !process.env.KPH_LLM_ENDPOINT) {
       errors.push({
         field: 'KPH_LLM_ENDPOINT',
         message: 'Endpoint URL is required for OpenAI-compatible LLM provider',
         fix: 'Set KPH_LLM_ENDPOINT environment variable (e.g., http://localhost:8080/v1)',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/byom-llm-setup.md#openai-compatible',
       });
     }
     // Note: Ollama doesn't require an API key and defaults to localhost:11434
@@ -95,6 +104,7 @@ export async function validateConfig(): Promise<void> {
         field: 'RESEND_API_KEY',
         message: 'Resend API key is required when using Resend email provider',
         fix: 'Set RESEND_API_KEY environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/email-setup.md#resend',
       });
     }
   } else if (emailProvider === 'smtp') {
@@ -102,7 +112,8 @@ export async function validateConfig(): Promise<void> {
       errors.push({
         field: 'KPH_SMTP_HOST',
         message: 'SMTP host is required when using SMTP email provider',
-        fix: 'Set KPH_SMTP_HOST environment variable',
+        fix: 'Set KPH_SMTP_HOST environment variable (e.g., smtp.gmail.com)',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/email-setup.md#smtp',
       });
     }
     if (!process.env.KPH_SMTP_USER) {
@@ -110,6 +121,7 @@ export async function validateConfig(): Promise<void> {
         field: 'KPH_SMTP_USER',
         message: 'SMTP username is required when using SMTP email provider',
         fix: 'Set KPH_SMTP_USER environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/email-setup.md#smtp',
       });
     }
     if (!process.env.KPH_SMTP_PASSWORD) {
@@ -117,6 +129,7 @@ export async function validateConfig(): Promise<void> {
         field: 'KPH_SMTP_PASSWORD',
         message: 'SMTP password is required when using SMTP email provider',
         fix: 'Set KPH_SMTP_PASSWORD environment variable',
+        docs: 'https://github.com/kubenetlabs/kph/blob/main/docs/email-setup.md#smtp',
       });
     }
   }
@@ -139,10 +152,14 @@ export async function validateConfig(): Promise<void> {
     errors.forEach((error, index) => {
       console.error(`${index + 1}. ${error.message}`);
       console.error(`   Field: ${error.field}`);
-      console.error(`   Fix: ${error.fix}\n`);
+      console.error(`   Fix: ${error.fix}`);
+      if (error.docs) {
+        console.error(`   Docs: ${error.docs}`);
+      }
+      console.error('');
     });
 
-    console.error('Documentation: https://github.com/kubenetlabs/kph#configuration\n');
+    console.error('General documentation: https://github.com/kubenetlabs/kph#configuration\n');
 
     throw new Error(
       `Configuration validation failed with ${errors.length} error${errors.length > 1 ? 's' : ''}. ` +
@@ -153,8 +170,8 @@ export async function validateConfig(): Promise<void> {
   // Success message
   console.log('✅ Configuration validated successfully');
   console.log(`   Auth: ${authProvider}`);
-  console.log(`   LLM: ${llmProvider || 'disabled'}`);
-  console.log(`   Email: ${emailProvider || 'none'}`);
+  console.log(`   LLM: ${llmProvider ?? 'disabled'}`);
+  console.log(`   Email: ${emailProvider ?? 'none'}`);
 }
 
 /**
