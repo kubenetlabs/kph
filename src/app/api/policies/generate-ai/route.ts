@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { getLLMProvider } from "~/lib/llm";
+import { POLICY_GENERATION_SYSTEM_PROMPT } from "~/lib/llm/prompts/policy-generation";
+
+// Force dynamic rendering - evaluate env vars at runtime, not build time
+export const dynamic = "force-dynamic";
 
 // Request validation schema
 const generatePolicyRequestSchema = z.object({
@@ -20,125 +24,6 @@ const generatePolicyRequestSchema = z.object({
     .default("CILIUM_NETWORK"),
   targetNamespace: z.string().optional(),
 });
-
-const SYSTEM_PROMPT = `You are an expert Kubernetes network policy engineer specializing in Cilium, Tetragon, and Gateway API policies. Your task is to generate valid, production-ready Kubernetes policy YAML based on natural language descriptions.
-
-Guidelines:
-1. Generate ONLY valid YAML - no explanations before or after the YAML
-2. Use proper Kubernetes API versions and kinds
-3. Include helpful comments in the YAML explaining key sections
-4. Follow security best practices (principle of least privilege)
-5. Use descriptive names for policies based on their purpose
-
-Policy Types:
-- CILIUM_NETWORK: CiliumNetworkPolicy (apiVersion: cilium.io/v2) - namespace-scoped network policies
-- CILIUM_CLUSTERWIDE: CiliumClusterwideNetworkPolicy (apiVersion: cilium.io/v2) - cluster-wide network policies
-- TETRAGON: TracingPolicy (apiVersion: cilium.io/v1alpha1) - runtime security and observability
-- GATEWAY_HTTPROUTE: HTTPRoute (apiVersion: gateway.networking.k8s.io/v1) - HTTP routing rules
-- GATEWAY_GRPCROUTE: GRPCRoute (apiVersion: gateway.networking.k8s.io/v1alpha2) - gRPC routing rules
-- GATEWAY_TCPROUTE: TCPRoute (apiVersion: gateway.networking.k8s.io/v1alpha2) - TCP routing rules
-
-For Cilium Network Policies, remember:
-- endpointSelector selects the pods the policy applies TO
-- ingress rules define what can connect TO the selected pods
-- egress rules define what the selected pods can connect TO
-- Use matchLabels for selecting pods by labels
-- Use fromEndpoints/toEndpoints for pod-to-pod rules
-- Use fromCIDR/toCIDR for IP-based rules
-- Use toPorts for port restrictions
-- Use toFQDNs for DNS-based egress rules
-
-For Tetragon Tracing Policies:
-- Use TracingPolicyNamespaced (apiVersion: cilium.io/v1alpha1) for namespace-scoped policies
-- Use TracingPolicy (apiVersion: cilium.io/v1alpha1) for cluster-wide policies (no namespace in metadata)
-- kprobes structure requires: call (string), syscall (boolean), args (to capture syscall arguments), and selectors (array)
-- selectors contain: matchArgs, matchNamespaces, and matchActions
-- matchActions use "action: Sigkill" to kill the process
-- CRITICAL: For sys_execve, use matchArgs with index 0 to match the binary being executed (NOT matchBinaries which matches the calling process)
-- CRITICAL: When using matchArgs, you MUST define the args array with index and type to capture the argument
-
-CRITICAL: Tetragon TracingPolicy structure example for blocking shell execution:
-\`\`\`yaml
-apiVersion: cilium.io/v1alpha1
-kind: TracingPolicyNamespaced
-metadata:
-  name: block-shell-execution
-  namespace: target-namespace
-spec:
-  kprobes:
-  - call: "sys_execve"
-    syscall: true
-    args:
-    - index: 0
-      type: "string"
-    selectors:
-    - matchArgs:
-      - index: 0
-        operator: "Postfix"
-        values:
-        - "/sh"
-        - "/bash"
-        - "/zsh"
-        - "/dash"
-        - "/ash"
-      matchActions:
-      - action: Sigkill
-\`\`\`
-
-Example for blocking file reads (e.g., /etc/shadow, service account tokens):
-\`\`\`yaml
-apiVersion: cilium.io/v1alpha1
-kind: TracingPolicyNamespaced
-metadata:
-  name: block-sensitive-file-reads
-  namespace: target-namespace
-spec:
-  kprobes:
-  - call: "sys_openat"
-    syscall: true
-    args:
-    - index: 1
-      type: "string"
-    selectors:
-    - matchArgs:
-      - index: 1
-        operator: "Prefix"
-        values:
-        - "/etc/shadow"
-        - "/var/run/secrets/kubernetes.io/serviceaccount"
-      matchActions:
-      - action: Sigkill
-\`\`\`
-
-Example for blocking network tools (curl, wget, nc):
-\`\`\`yaml
-apiVersion: cilium.io/v1alpha1
-kind: TracingPolicyNamespaced
-metadata:
-  name: block-network-tools
-  namespace: target-namespace
-spec:
-  kprobes:
-  - call: "sys_execve"
-    syscall: true
-    args:
-    - index: 0
-      type: "string"
-    selectors:
-    - matchArgs:
-      - index: 0
-        operator: "Postfix"
-        values:
-        - "/curl"
-        - "/wget"
-        - "/nc"
-        - "/netcat"
-        - "/ncat"
-      matchActions:
-      - action: Sigkill
-\`\`\`
-
-Respond with ONLY the YAML content, starting with "apiVersion:" and nothing else.`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -161,22 +46,20 @@ export async function POST(request: NextRequest) {
 
     const { prompt, policyType, targetNamespace } = validationResult.data;
 
-    // Check for API key
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    // Get LLM provider
+    const provider = getLLMProvider();
+    if (!provider) {
       return NextResponse.json(
         {
-          error: "ANTHROPIC_API_KEY is not configured",
-          message: "Please add your Anthropic API key to the .env file",
+          error: "AI policy generation is not configured",
+          message:
+            "Set KPH_LLM_PROVIDER and KPH_LLM_API_KEY environment variables, " +
+            "or set ANTHROPIC_API_KEY for backward compatibility.",
+          docs: "https://github.com/kubenetlabs/kph/docs/byom-llm-setup.md",
         },
-        { status: 500 }
+        { status: 501 }
       );
     }
-
-    // Initialize Anthropic client
-    const anthropic = new Anthropic({
-      apiKey,
-    });
 
     // Build the user prompt
     const userPrompt = `Generate a ${policyType} policy for the following requirement:
@@ -191,29 +74,15 @@ Remember:
 - Follow security best practices
 - Use descriptive metadata names`;
 
-    // Call Claude API
-    const message = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
-      max_tokens: 2048,
-      messages: [
-        {
-          role: "user",
-          content: userPrompt,
-        },
-      ],
-      system: SYSTEM_PROMPT,
+    // Call LLM provider
+    const response = await provider.generate({
+      systemPrompt: POLICY_GENERATION_SYSTEM_PROMPT,
+      userPrompt,
+      maxTokens: 2048,
     });
 
     // Extract the generated YAML
-    const content = message.content[0];
-    if (!content || content.type !== "text") {
-      return NextResponse.json(
-        { error: "Unexpected response format from Claude" },
-        { status: 500 }
-      );
-    }
-
-    let generatedYaml = (content as { type: "text"; text: string }).text.trim();
+    let generatedYaml = response.content.trim();
 
     // Clean up the response - remove markdown code blocks if present
     if (generatedYaml.startsWith("```yaml")) {
@@ -241,40 +110,48 @@ Remember:
         description: prompt,
         type: policyType,
         content: generatedYaml,
-        targetNamespaces: extractedNamespace ? [extractedNamespace] : targetNamespace ? [targetNamespace] : [],
+        targetNamespaces: extractedNamespace
+          ? [extractedNamespace]
+          : targetNamespace
+            ? [targetNamespace]
+            : [],
         generatedFrom: prompt,
-        generatedModel: "claude-3-haiku-20240307",
+        generatedModel: response.model,
+        generatedProvider: response.provider,
       },
-      usage: {
-        inputTokens: message.usage.input_tokens,
-        outputTokens: message.usage.output_tokens,
-      },
+      usage: response.usage,
     });
   } catch (error) {
-    console.error("Error generating policy with Claude:", error);
+    console.error("Error generating policy with LLM:", error);
 
-    if (error instanceof Anthropic.APIError) {
-      const statusCode = typeof error.status === "number" ? error.status : 500;
-      return NextResponse.json(
-        {
-          error: "Claude API error",
-          message: error.message,
-          status: statusCode,
-        },
-        { status: statusCode }
-      );
+    // Handle provider-specific errors
+    if (error instanceof Error) {
+      // Check for common API errors
+      const message = error.message.toLowerCase();
+      if (message.includes("api key") || message.includes("authentication") || message.includes("unauthorized")) {
+        return NextResponse.json(
+          {
+            error: "LLM authentication failed",
+            message: "Check your API key configuration",
+          },
+          { status: 401 }
+        );
+      }
+      if (message.includes("rate limit") || message.includes("too many requests")) {
+        return NextResponse.json(
+          {
+            error: "LLM rate limit exceeded",
+            message: "Please try again in a moment",
+          },
+          { status: 429 }
+        );
+      }
     }
 
     if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        { error: "Invalid JSON in request body" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
     }
 
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -1,0 +1,232 @@
+# =============================================================================
+# KPH (Kubernetes Policy Hub) Helm Chart Values
+# =============================================================================
+# Minimal install: helm install kph . --set database.embedded.enabled=true
+# =============================================================================
+
+# --- Global Settings ---
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# =============================================================================
+# KPH Application (Next.js UI + API)
+# =============================================================================
+app:
+  enabled: true
+
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/kubenetlabs/kph
+    tag: ""  # Defaults to Chart.appVersion
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: kph.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+      # - secretName: kph-tls
+      #   hosts:
+      #     - kph.local
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Run Prisma migrations on startup
+  autoMigrate: true
+
+  # Pod settings
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Extra environment variables
+  extraEnv: []
+    # - name: MY_VAR
+    #   value: "my-value"
+
+# =============================================================================
+# Authentication (Optional - disabled by default)
+# =============================================================================
+auth:
+  # Provider: none (default), clerk, or oidc
+  provider: "none"
+
+  # --- No-auth mode (default) ---
+  # Runs with a default admin user. Suitable for:
+  # - Local development
+  # - Single-user deployments
+  # - Behind VPN/reverse proxy
+
+  # --- Clerk (hosted auth) ---
+  clerk:
+    publishableKey: ""
+    secretKey: ""
+    # Use existing secret instead of creating one
+    existingSecret: ""
+    # Key names in the existing secret
+    publishableKeyKey: "publishable-key"
+    secretKeyKey: "secret-key"
+
+  # --- OIDC (coming soon) ---
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    clientSecret: ""
+    existingSecret: ""
+
+# =============================================================================
+# Database
+# =============================================================================
+database:
+  # --- Embedded PostgreSQL (default for testing/dev) ---
+  embedded:
+    enabled: true
+
+    image:
+      repository: postgres
+      tag: "16-alpine"
+      pullPolicy: IfNotPresent
+
+    auth:
+      database: kph
+      username: kph
+      # Password - auto-generated if empty
+      password: ""
+      # Use existing secret
+      existingSecret: ""
+      passwordKey: "postgres-password"
+
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: ""
+      accessModes:
+        - ReadWriteOnce
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # --- External PostgreSQL ---
+  external:
+    enabled: false
+    # Full connection URL (takes precedence)
+    url: ""
+    # Or use existing secret with 'database-url' key
+    existingSecret: ""
+    urlKey: "database-url"
+
+# =============================================================================
+# LLM / AI Policy Generation (Optional)
+# =============================================================================
+llm:
+  enabled: false
+
+  # Provider: anthropic, openai, ollama, openai-compatible
+  provider: ""
+
+  # API key (not needed for ollama)
+  apiKey: ""
+
+  # Model override (optional)
+  model: ""
+
+  # Endpoint (required for ollama/openai-compatible)
+  endpoint: ""
+
+  # Use existing secret for API key
+  existingSecret: ""
+  apiKeyKey: "api-key"
+
+# =============================================================================
+# Email (Optional)
+# =============================================================================
+email:
+  # Provider: none (default), resend, smtp
+  provider: "none"
+
+  fromAddress: "Policy Hub <noreply@kph.local>"
+
+  # --- Resend ---
+  resend:
+    apiKey: ""
+    existingSecret: ""
+    apiKeyKey: "api-key"
+
+  # --- SMTP (coming soon) ---
+  smtp:
+    host: ""
+    port: 587
+    secure: false
+    username: ""
+    password: ""
+    existingSecret: ""
+
+# =============================================================================
+# Security
+# =============================================================================
+security:
+  # Encryption key for sensitive data (cluster tokens, etc.)
+  # Auto-generated if empty
+  encryptionKey: ""
+  existingSecret: ""
+  encryptionKeyKey: "encryption-key"
+
+# =============================================================================
+# Service Account
+# =============================================================================
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+# =============================================================================
+# Pod Security
+# =============================================================================
+podSecurityContext:
+  fsGroup: 1001
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# =============================================================================
+# Operator / Agent (subchart - coming soon)
+# =============================================================================
+# kph-agent:
+#   enabled: false

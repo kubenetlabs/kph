@@ -2,25 +2,70 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Input from "~/components/ui/input";
 import { trpc } from "~/lib/trpc";
+import { useAuthProvider } from "~/providers/auth-provider";
+
+// Types for Clerk's useUser hook
+interface ClerkUser {
+  id: string;
+  fullName: string | null;
+  primaryEmailAddress: { emailAddress: string } | null;
+}
+type UseUserResult = { user: ClerkUser | null; isLoaded: boolean };
+type UseUserHook = () => UseUserResult;
+
+// Conditionally use Clerk's useUser hook
+const useUserInfo = () => {
+  const authProvider = useAuthProvider();
+
+  if (authProvider === "clerk") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const clerk = require("@clerk/nextjs") as { useUser: UseUserHook };
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const { user, isLoaded } = clerk.useUser();
+      return {
+        user,
+        isLoaded,
+        displayName: user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "User",
+      };
+    } catch {
+      return { user: null, isLoaded: true, displayName: "User" };
+    }
+  }
+
+  // In no-auth mode, user is the default admin
+  return {
+    user: { id: "kph_default_admin" },
+    isLoaded: true,
+    displayName: "Admin",
+  };
+};
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, isLoaded: isUserLoaded } = useUser();
+  const authProvider = useAuthProvider();
+  const { user, isLoaded: isUserLoaded, displayName } = useUserInfo();
 
   const [step, setStep] = useState<"welcome" | "create-org">("welcome");
   const [orgName, setOrgName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugError, setSlugError] = useState<string | null>(null);
 
+  // In no-auth mode, redirect to dashboard immediately
+  useEffect(() => {
+    if (authProvider === "none") {
+      router.push("/dashboard");
+    }
+  }, [authProvider, router]);
+
   // Check onboarding status
   const { data: status, isLoading: isLoadingStatus } = trpc.onboarding.checkStatus.useQuery(
     undefined,
-    { enabled: isUserLoaded && !!user }
+    { enabled: isUserLoaded && !!user && authProvider !== "none" }
   );
 
   // Mutations
@@ -89,6 +134,15 @@ export default function OnboardingPage() {
     setSlug(cleaned);
   };
 
+  // In no-auth mode, show loading while redirecting
+  if (authProvider === "none") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="animate-pulse text-muted">Redirecting to dashboard...</div>
+      </div>
+    );
+  }
+
   if (!isUserLoaded || isLoadingStatus) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -123,7 +177,7 @@ export default function OnboardingPage() {
         {step === "welcome" && (
           <Card>
             <CardHeader className="text-center">
-              <CardTitle>Welcome, {user?.fullName ?? user?.primaryEmailAddress?.emailAddress}!</CardTitle>
+              <CardTitle>Welcome, {displayName}!</CardTitle>
               <CardDescription>
                 {"Let's get you set up with your organization"}
               </CardDescription>

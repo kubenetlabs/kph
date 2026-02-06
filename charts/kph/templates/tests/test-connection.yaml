@@ -1,0 +1,17 @@
+{{- if .Values.app.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kph.fullname" . }}-test-connection"
+  labels:
+    {{- include "kph.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "kph.fullname" . }}:{{ .Values.app.service.port }}']
+  restartPolicy: Never
+{{- end }}

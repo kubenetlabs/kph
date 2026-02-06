@@ -1,0 +1,30 @@
+apiVersion: v2
+name: kph
+description: Kubernetes Policy Hub - The system of record for Kubernetes networking and security
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - kubernetes
+  - network-policy
+  - cilium
+  - tetragon
+  - gateway-api
+  - security
+
+home: https://github.com/kubenetlabs/kph
+sources:
+  - https://github.com/kubenetlabs/kph
+
+maintainers:
+  - name: KubenetLabs
+    url: https://kubenetlabs.com
+
+# Dependencies (operator/agent chart)
+# Uncomment when ready to include as subchart
+# dependencies:
+#   - name: kph-agent
+#     version: "0.1.0"
+#     repository: "file://../operator/charts/kph-agent"
+#     condition: kph-agent.enabled

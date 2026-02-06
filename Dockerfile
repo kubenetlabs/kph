@@ -3,6 +3,8 @@
 # =============================================================================
 # Multi-stage build for optimized production image
 # Produces a standalone Next.js application (~150MB)
+#
+# Auth is OPTIONAL - builds without Clerk keys by default (anonymous mode)
 # =============================================================================
 
 # --- Base ---
@@ -26,9 +28,11 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 
-# Build args for services that validate keys at build time
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-ARG CLERK_SECRET_KEY
+# Build-time auth provider configuration
+# Default to "none" (anonymous mode) - no Clerk keys required
+ARG KPH_AUTH_PROVIDER=none
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
+ARG CLERK_SECRET_KEY=""
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -42,8 +46,12 @@ ENV NODE_ENV=production
 # Use a dummy URL that satisfies Prisma's format check
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 
-# Clerk requires keys at build time for static generation
-# Pass via --build-arg or use test keys
+# Auth configuration for build
+# When KPH_AUTH_PROVIDER=none (default), Clerk is not loaded
+ENV KPH_AUTH_PROVIDER=${KPH_AUTH_PROVIDER}
+ENV NEXT_PUBLIC_KPH_AUTH_PROVIDER=${KPH_AUTH_PROVIDER}
+
+# Only set Clerk keys if provider is clerk
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
 
@@ -77,6 +85,13 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+
+# Copy tsx for running seed script
+COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
+COPY --from=builder /app/node_modules/esbuild ./node_modules/esbuild
+COPY --from=builder /app/node_modules/esbuild-* ./node_modules/
+COPY --from=builder /app/node_modules/get-tsconfig ./node_modules/get-tsconfig
+COPY --from=builder /app/node_modules/resolve-pkg-maps ./node_modules/resolve-pkg-maps
 
 # Copy entrypoint script
 COPY --from=builder /app/docker-entrypoint.sh ./

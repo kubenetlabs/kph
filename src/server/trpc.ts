@@ -1,9 +1,9 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { type FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
-import { auth } from "@clerk/nextjs/server";
 import superjson from "superjson";
 import { ZodError, z } from "zod";
 import { db } from "~/lib/db";
+import { getAuthSession } from "~/lib/auth/index";
 import type { Role } from "@prisma/client";
 import { hasMinRole, checkClusterAccess, type PermissionUser } from "~/lib/permissions";
 
@@ -23,18 +23,30 @@ export interface UserContext {
  * This runs for each request and makes the database and auth available to all procedures
  */
 export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
-  // Get the auth from Clerk
-  const { userId: clerkUserId } = await auth();
+  // Get auth session from the configured provider (Clerk, none, OIDC, etc.)
+  const session = await getAuthSession();
 
-  // If user is authenticated, get or create their database record
-  let userId: string | null = null;
+  // Extract user context from session
+  let userId: string | null = session.userId;
   let organizationId: string | null = null;
   let user: UserContext | null = null;
 
-  if (clerkUserId) {
-    // Find or create user in our database
+  if (session.isAuthenticated && session.user) {
+    // User is fully authenticated with a database record
+    userId = session.user.id;
+    organizationId = session.user.organizationId;
+    user = {
+      id: session.user.id,
+      email: session.user.email,
+      isSuperAdmin: session.user.isSuperAdmin,
+      newRole: session.user.newRole,
+      organizationId: session.user.organizationId,
+    };
+  } else if (session.isAuthenticated && session.userId && !session.user) {
+    // User authenticated but not yet in our DB (Clerk onboarding case)
+    // Try to look up the user in case they exist
     const dbUser = await db.user.findFirst({
-      where: { id: clerkUserId },
+      where: { id: session.userId },
       select: {
         id: true,
         email: true,
@@ -44,10 +56,7 @@ export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
       },
     });
 
-    if (!dbUser) {
-      // User doesn't exist in our DB yet - they'll be created during onboarding
-      userId = clerkUserId;
-    } else {
+    if (dbUser) {
       userId = dbUser.id;
       organizationId = dbUser.organizationId;
       user = dbUser;
@@ -56,10 +65,12 @@ export const createTRPCContext = async (opts: FetchCreateContextFnOptions) => {
 
   return {
     db,
-    clerkUserId,
+    // Keep clerkUserId for backward compatibility (same as userId now)
+    clerkUserId: userId,
     userId,
     organizationId,
     user,
+    authProvider: session.provider,
     headers: opts.req.headers,
   };
 };
@@ -97,9 +108,10 @@ export const publicProcedure = t.procedure;
 
 /**
  * Protected (authenticated) procedure
- * Ensures user is authenticated via Clerk before running
+ * Ensures user is authenticated before running
  */
 export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  // In no-auth mode, clerkUserId will be the default user ID
   if (!ctx.clerkUserId) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }

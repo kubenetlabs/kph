@@ -1,28 +1,19 @@
 /**
  * Server-side authentication helpers for Next.js App Router
+ *
+ * This is a compatibility layer that re-exports from the auth abstraction.
+ * New code should import directly from ~/lib/auth/index.ts
  */
 
-import { auth } from "@clerk/nextjs/server";
-import { db } from "./db";
-import type { Role } from "@prisma/client";
+import {
+  getCurrentUser as getUser,
+  requireUser as requireAuthUser,
+  getAuthSession,
+} from "./auth/index";
+import type { AuthUser } from "./auth/types";
 
-/**
- * User object with RBAC fields for server-side checks
- */
-export interface ServerUser {
-  id: string;
-  email: string;
-  name: string | null;
-  image: string | null;
-  isSuperAdmin: boolean;
-  newRole: Role;
-  organizationId: string | null;
-  organization: {
-    id: string;
-    name: string;
-    slug: string;
-  } | null;
-}
+// Re-export the AuthUser type as ServerUser for backward compatibility
+export type ServerUser = AuthUser;
 
 /**
  * Get the current authenticated user with their database record
@@ -31,33 +22,7 @@ export interface ServerUser {
  * @returns The user or null if not authenticated/not in database
  */
 export async function getCurrentUser(): Promise<ServerUser | null> {
-  const { userId: clerkUserId } = await auth();
-
-  if (!clerkUserId) {
-    return null;
-  }
-
-  const user = await db.user.findUnique({
-    where: { id: clerkUserId },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      image: true,
-      isSuperAdmin: true,
-      newRole: true,
-      organizationId: true,
-      organization: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-        },
-      },
-    },
-  });
-
-  return user;
+  return getUser();
 }
 
 /**
@@ -68,13 +33,7 @@ export async function getCurrentUser(): Promise<ServerUser | null> {
  * @throws Error if not authenticated
  */
 export async function requireUser(): Promise<ServerUser> {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    throw new Error("Authentication required");
-  }
-
-  return user;
+  return requireAuthUser();
 }
 
 /**
@@ -102,3 +61,6 @@ export async function isSuperAdmin(): Promise<boolean> {
   const user = await getCurrentUser();
   return user?.isSuperAdmin === true;
 }
+
+// Re-export from new auth module for convenience
+export { getAuthSession, getAuthProviderName, isAuthEnabled } from "./auth/index";

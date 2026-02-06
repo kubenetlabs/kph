@@ -1,0 +1,184 @@
+{{- if .Values.app.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kph.fullname" . }}
+  labels:
+    {{- include "kph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "kph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kph.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kph
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "kph.app.image" . }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Database
+            {{- if .Values.database.external.enabled }}
+            {{- if .Values.database.external.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.existingSecret }}
+                  key: {{ .Values.database.external.urlKey | default "database-url" }}
+            {{- else if .Values.database.external.url }}
+            - name: DATABASE_URL
+              value: {{ .Values.database.external.url | quote }}
+            {{- end }}
+            {{- else if .Values.database.embedded.enabled }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.databaseSecretName" . }}
+                  key: {{ .Values.database.embedded.auth.passwordKey | default "postgres-password" }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.database.embedded.auth.username }}:$(DATABASE_PASSWORD)@{{ include "kph.fullname" . }}-db:5432/{{ .Values.database.embedded.auth.database }}?sslmode=disable"
+            {{- end }}
+
+            # Auto-migrate
+            {{- if .Values.app.autoMigrate }}
+            - name: KPH_DB_PUSH
+              value: "true"
+            {{- end }}
+
+            # Runtime
+            - name: KPH_DOCKER
+              value: "1"
+            - name: NODE_ENV
+              value: "production"
+
+            # Auth provider
+            - name: KPH_AUTH_PROVIDER
+              value: {{ .Values.auth.provider | quote }}
+            - name: NEXT_PUBLIC_KPH_AUTH_PROVIDER
+              value: {{ .Values.auth.provider | quote }}
+
+            {{- if eq .Values.auth.provider "clerk" }}
+            - name: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.authSecretName" . }}
+                  key: {{ .Values.auth.clerk.publishableKeyKey | default "publishable-key" }}
+            - name: CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.authSecretName" . }}
+                  key: {{ .Values.auth.clerk.secretKeyKey | default "secret-key" }}
+            {{- end }}
+
+            {{- if eq .Values.auth.provider "oidc" }}
+            - name: KPH_OIDC_ISSUER_URL
+              value: {{ .Values.auth.oidc.issuerUrl | quote }}
+            - name: KPH_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            - name: KPH_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.authSecretName" . }}
+                  key: client-secret
+            {{- end }}
+
+            # LLM
+            {{- if .Values.llm.enabled }}
+            - name: KPH_LLM_PROVIDER
+              value: {{ .Values.llm.provider | quote }}
+            {{- if .Values.llm.model }}
+            - name: KPH_LLM_MODEL
+              value: {{ .Values.llm.model | quote }}
+            {{- end }}
+            {{- if .Values.llm.endpoint }}
+            - name: KPH_LLM_ENDPOINT
+              value: {{ .Values.llm.endpoint | quote }}
+            {{- end }}
+            {{- if or .Values.llm.apiKey .Values.llm.existingSecret }}
+            - name: KPH_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kph.llmSecretName" . }}
+                  key: {{ .Values.llm.apiKeyKey | default "api-key" }}
+            {{- end }}
+            {{- end }}
+
+            # Email
+            {{- if ne .Values.email.provider "none" }}
+            - name: KPH_EMAIL_PROVIDER
+              value: {{ .Values.email.provider | quote }}
+            - name: KPH_EMAIL_FROM
+              value: {{ .Values.email.fromAddress | quote }}
+            {{- if eq .Values.email.provider "resend" }}
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.email.resend.existingSecret | default (printf "%s-email" (include "kph.fullname" .)) }}
+                  key: {{ .Values.email.resend.apiKeyKey | default "api-key" }}
+            {{- end }}
+            {{- end }}
+
+            # Encryption key
+            {{- if or .Values.security.encryptionKey .Values.security.existingSecret }}
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.existingSecret | default (printf "%s-security" (include "kph.fullname" .)) }}
+                  key: {{ .Values.security.encryptionKeyKey | default "encryption-key" }}
+            {{- end }}
+
+            # Extra env vars
+            {{- with .Values.app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,16 +1,63 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useUser, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "~/components/ui/card";
 import Button from "~/components/ui/button";
 import Badge from "~/components/ui/badge";
 import { trpc } from "~/lib/trpc";
+import { useAuthProvider } from "~/providers/auth-provider";
+
+import type { ReactNode, ComponentType } from "react";
+
+// Types for Clerk hooks and components
+type UseUserResult = { isSignedIn: boolean; isLoaded: boolean };
+type UseUserHook = () => UseUserResult;
+type ClerkButtonProps = { mode?: string; children: ReactNode };
+type ClerkButtonComponent = ComponentType<ClerkButtonProps>;
+
+interface ClerkModule {
+  useUser: UseUserHook;
+  SignInButton: ClerkButtonComponent;
+  SignUpButton: ClerkButtonComponent;
+}
+
+// Conditionally import Clerk hooks
+const useClerkAuth = () => {
+  const authProvider = useAuthProvider();
+
+  if (authProvider === "clerk") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const clerk = require("@clerk/nextjs") as ClerkModule;
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const { isSignedIn, isLoaded } = clerk.useUser();
+      return {
+        isSignedIn,
+        isLoaded,
+        SignInButton: clerk.SignInButton,
+        SignUpButton: clerk.SignUpButton,
+        isClerk: true,
+      };
+    } catch {
+      return { isSignedIn: true, isLoaded: true, isClerk: false, SignInButton: null, SignUpButton: null };
+    }
+  }
+
+  // In no-auth mode, user is always signed in
+  return {
+    isSignedIn: true,
+    isLoaded: true,
+    SignInButton: null,
+    SignUpButton: null,
+    isClerk: false,
+  };
+};
 
 export default function InvitationPage() {
   const params = useParams();
   const router = useRouter();
-  const { isSignedIn, isLoaded: userLoaded } = useUser();
+  const authProvider = useAuthProvider();
+  const { isSignedIn, isLoaded: userLoaded, SignInButton, SignUpButton, isClerk } = useClerkAuth();
 
   const invitationId = params.id as string;
 
@@ -20,7 +67,7 @@ export default function InvitationPage() {
   );
 
   const acceptMutation = trpc.invitation.accept.useMutation({
-    onSuccess: (data) => {
+    onSuccess: () => {
       // Redirect to dashboard after accepting
       router.push("/dashboard");
     },
@@ -29,6 +76,32 @@ export default function InvitationPage() {
   const handleAccept = async () => {
     await acceptMutation.mutateAsync({ invitationId });
   };
+
+  // In no-auth mode, invitations aren't really supported
+  if (authProvider === "none") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="text-center">Invitations Disabled</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center">
+            <p className="text-muted">
+              Team invitations are not available in anonymous mode.
+              The system is configured for single-user access.
+            </p>
+            <Button
+              className="mt-4"
+              variant="secondary"
+              onClick={() => router.push("/dashboard")}
+            >
+              Go to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Loading state
   if (isLoading || !userLoaded) {
@@ -180,7 +253,7 @@ export default function InvitationPage() {
                 Cancel
               </Button>
             </div>
-          ) : (
+          ) : isClerk && SignInButton && SignUpButton ? (
             <div className="space-y-3">
               <p className="mb-4 text-center text-sm text-muted">
                 Sign in or create an account to accept this invitation.
@@ -193,6 +266,18 @@ export default function InvitationPage() {
                   Create Account
                 </Button>
               </SignUpButton>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="mb-4 text-center text-sm text-muted">
+                Please sign in to accept this invitation.
+              </p>
+              <Button
+                className="w-full"
+                onClick={() => router.push("/sign-in")}
+              >
+                Sign In
+              </Button>
             </div>
           )}
         </CardContent>

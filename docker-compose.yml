@@ -1,0 +1,119 @@
+# =============================================================================
+# KPH (Kubernetes Policy Hub) - Docker Compose
+# =============================================================================
+# Quick start: docker compose up
+#
+# This runs the complete KPH stack with ZERO configuration required.
+# By default, KPH runs in anonymous admin mode (no authentication).
+#
+# Optional configuration via .env file or environment variables:
+#   - Authentication: Set KPH_AUTH_PROVIDER=clerk with Clerk keys
+#   - AI Policy Generation: Set KPH_LLM_PROVIDER with API keys
+#   - Email: Set RESEND_API_KEY for invitation emails
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kph
+      POSTGRES_USER: kph
+      POSTGRES_PASSWORD: ${KPH_DB_PASSWORD:-kph-docker-password}
+    ports:
+      - "${KPH_DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kph -d kph"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # KPH Application (Next.js)
+  # ---------------------------------------------------------------------------
+  kph:
+    image: ${KPH_IMAGE:-kph:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${KPH_PORT:-3000}:3000"
+    environment:
+      # Database
+      DATABASE_URL: "postgresql://kph:${KPH_DB_PASSWORD:-kph-docker-password}@postgres:5432/kph?sslmode=disable"
+      KPH_DB_PUSH: "true"
+
+      # Runtime flags
+      KPH_DOCKER: "1"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-http://localhost:3000}"
+
+      # Authentication (default: anonymous admin mode)
+      KPH_AUTH_PROVIDER: "${KPH_AUTH_PROVIDER:-none}"
+      NEXT_PUBLIC_KPH_AUTH_PROVIDER: "${KPH_AUTH_PROVIDER:-none}"
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}"
+      CLERK_SECRET_KEY: "${CLERK_SECRET_KEY:-}"
+
+      # LLM / AI Policy Generation (optional)
+      KPH_LLM_PROVIDER: "${KPH_LLM_PROVIDER:-}"
+      KPH_LLM_API_KEY: "${KPH_LLM_API_KEY:-}"
+      KPH_LLM_MODEL: "${KPH_LLM_MODEL:-}"
+      KPH_LLM_ENDPOINT: "${KPH_LLM_ENDPOINT:-}"
+      # Legacy support
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+
+      # Email (optional)
+      KPH_EMAIL_PROVIDER: "${KPH_EMAIL_PROVIDER:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      KPH_EMAIL_FROM: "${KPH_EMAIL_FROM:-}"
+
+      # Encryption key for secrets (auto-generated if not set)
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+
+# =============================================================================
+# Usage Examples
+# =============================================================================
+#
+# 1. Basic (zero config):
+#    docker compose up
+#
+# 2. With Clerk authentication:
+#    KPH_AUTH_PROVIDER=clerk \
+#    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_... \
+#    CLERK_SECRET_KEY=sk_... \
+#    docker compose up
+#
+# 3. With AI policy generation (Anthropic):
+#    ANTHROPIC_API_KEY=sk-ant-... docker compose up
+#
+# 4. With AI policy generation (OpenAI):
+#    KPH_LLM_PROVIDER=openai \
+#    KPH_LLM_API_KEY=sk-... \
+#    docker compose up
+#
+# 5. With local Ollama:
+#    KPH_LLM_PROVIDER=ollama \
+#    KPH_LLM_ENDPOINT=http://host.docker.internal:11434/v1 \
+#    KPH_LLM_MODEL=llama3 \
+#    docker compose up
+#
+# =============================================================================

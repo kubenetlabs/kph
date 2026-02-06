@@ -1,11 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { useOrganization } from "@clerk/nextjs";
 import ClusterInstallWizard from "~/components/clusters/cluster-install-wizard";
 import { trpc } from "~/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import Button from "~/components/ui/button";
+import { useAuthProvider } from "~/providers/auth-provider";
+import { DEFAULT_ORG_ID } from "~/lib/auth/providers/none";
+
+// Type for Clerk's useOrganization hook
+type UseOrganizationResult = { organization: { id: string } | null };
+type UseOrganizationHook = () => UseOrganizationResult;
+
+// Conditionally get organization from Clerk or use default
+const useOrganizationId = () => {
+  const authProvider = useAuthProvider();
+
+  if (authProvider === "clerk") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const clerk = require("@clerk/nextjs") as { useOrganization: UseOrganizationHook };
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const { organization } = clerk.useOrganization();
+      return organization?.id ?? DEFAULT_ORG_ID;
+    } catch {
+      return DEFAULT_ORG_ID;
+    }
+  }
+
+  // In no-auth mode, use default organization
+  return DEFAULT_ORG_ID;
+};
 
 const EXPIRY_OPTIONS: readonly { value: number; label: string; recommended?: boolean }[] = [
   { value: 7, label: "7 days" },
@@ -19,7 +44,7 @@ export default function InstallTestPage() {
   const [expiryDays, setExpiryDays] = useState<number>(90);
   const [showTokenConfig, setShowTokenConfig] = useState(false);
   const [agentToken, setAgentToken] = useState<string | null>(null);
-  const { organization } = useOrganization();
+  const organizationId = useOrganizationId();
 
   // Fetch clusters
   const { data: clustersData, isLoading: clustersLoading } = trpc.cluster.list.useQuery();
@@ -189,7 +214,7 @@ export default function InstallTestPage() {
         cluster={{
           id: selectedCluster.id,
           name: selectedCluster.name,
-          organizationId: organization?.id ?? "unknown",
+          organizationId: organizationId,
         }}
         agentToken={agentToken}
         serverUrl={serverUrl}

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
 /**
@@ -12,6 +11,19 @@ export const onboardingRouter = createTRPCRouter({
    * Check if user needs onboarding
    */
   checkStatus: protectedProcedure.query(async ({ ctx }) => {
+    // In no-auth mode, user is always fully onboarded with default org
+    if (ctx.authProvider === "none") {
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.userId },
+        include: { organization: true },
+      });
+
+      return {
+        needsOnboarding: false,
+        organization: user?.organization ?? null,
+      };
+    }
+
     // Try to find the user in our database
     const user = await ctx.db.user.findUnique({
       where: { id: ctx.userId },
@@ -50,6 +62,14 @@ export const onboardingRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // In no-auth mode, user already has a default org
+      if (ctx.authProvider === "none") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Organization management is not available in anonymous mode",
+        });
+      }
+
       // Check if slug is already taken
       const existingOrg = await ctx.db.organization.findUnique({
         where: { slug: input.slug },
@@ -74,12 +94,29 @@ export const onboardingRouter = createTRPCRouter({
         });
       }
 
-      // Get Clerk user details for creating the DB user
-      const clerkUser = await currentUser();
-      if (!clerkUser) {
+      // Get user details from auth provider
+      let userEmail = "";
+      let userName: string | null = null;
+
+      if (ctx.authProvider === "clerk") {
+        // Dynamically import Clerk to get user details
+        const { currentUser } = await import("@clerk/nextjs/server");
+        const clerkUser = await currentUser();
+
+        if (!clerkUser) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Unable to get user details",
+          });
+        }
+
+        userEmail = clerkUser.emailAddresses[0]?.emailAddress ?? "";
+        userName = clerkUser.fullName ?? clerkUser.firstName ?? null;
+      } else {
+        // For other providers, require email in input or throw
         throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Unable to get user details",
+          code: "BAD_REQUEST",
+          message: "User onboarding is not supported for this auth provider",
         });
       }
 
@@ -107,8 +144,8 @@ export const onboardingRouter = createTRPCRouter({
           where: { id: ctx.userId },
           create: {
             id: ctx.userId,
-            email: clerkUser.emailAddresses[0]?.emailAddress ?? "",
-            name: clerkUser.fullName ?? clerkUser.firstName ?? null,
+            email: userEmail,
+            name: userName,
             organizationId: org.id,
             role: "ADMIN",
           },

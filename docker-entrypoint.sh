@@ -12,15 +12,20 @@ echo "  KPH (Kubernetes Policy Hub)"
 echo "========================================"
 echo ""
 
-# --- Database Migrations ---
+# --- Database Setup ---
 if [ "$KPH_AUTO_MIGRATE" = "true" ]; then
   echo "[entrypoint] Running database migrations..."
-  npx prisma migrate deploy
+  node node_modules/prisma/build/index.js migrate deploy
   echo "[entrypoint] Migrations complete."
+  echo ""
+elif [ "$KPH_DB_PUSH" = "true" ]; then
+  echo "[entrypoint] Pushing database schema (dev mode)..."
+  node node_modules/prisma/build/index.js db push --skip-generate
+  echo "[entrypoint] Schema push complete."
   echo ""
 fi
 
-# --- Auth Mode Banner ---
+# --- Auth Mode Banner and Seeding ---
 AUTH_PROVIDER="${KPH_AUTH_PROVIDER:-none}"
 
 if [ "$AUTH_PROVIDER" = "none" ]; then
@@ -39,9 +44,21 @@ if [ "$AUTH_PROVIDER" = "none" ]; then
   echo ""
   echo "========================================"
   echo ""
+
+  # Seed default org and admin user for no-auth mode
+  echo "[entrypoint] Seeding default organization and admin user..."
+  node --import tsx prisma/seed-default-auth.ts || echo "[entrypoint] Warning: Seed script failed (may already be seeded)"
+  echo ""
 else
   echo "[entrypoint] Auth provider: $AUTH_PROVIDER"
   echo ""
+fi
+
+# --- Debug Info ---
+if [ -n "$KPH_DEBUG" ]; then
+  echo "[entrypoint] Debug - ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET}"
+  echo "[entrypoint] Debug - KPH_LLM_PROVIDER: ${KPH_LLM_PROVIDER:-not set}"
+  echo "[entrypoint] Debug - KPH_AUTH_PROVIDER: ${KPH_AUTH_PROVIDER:-none}"
 fi
 
 # --- Start Application ---

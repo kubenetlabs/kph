@@ -1,6 +1,6 @@
 "use client";
 
-import { ClerkProvider } from "@clerk/nextjs";
+import { AuthProvider } from "./auth-provider";
 import { TRPCProvider } from "./trpc-provider";
 import { ThemeProvider } from "~/components/theme/theme-provider";
 import { CommandPalette } from "~/components/command-palette/command-palette";
@@ -8,7 +8,7 @@ import { TourProvider, TourOverlay } from "~/components/guided-tour";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
+    <AuthProvider>
       <ThemeProvider defaultTheme="dark">
         <TRPCProvider>
           <TourProvider>
@@ -18,6 +18,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           </TourProvider>
         </TRPCProvider>
       </ThemeProvider>
-    </ClerkProvider>
+    </AuthProvider>
   );
 }

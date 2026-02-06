@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "~/lib/auth";
 import AdminSidebar from "~/components/layout/admin-sidebar";
 
+// Force dynamic rendering - admin pages require auth and database access
+export const dynamic = "force-dynamic";
+
 /**
  * Admin Layout
  *
