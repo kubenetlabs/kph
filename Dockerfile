@@ -8,7 +8,7 @@
 # =============================================================================
 
 # --- Base ---
-FROM node:20-alpine AS base
+FROM node:25-alpine AS base
 # Install libc6-compat for Alpine compatibility
 # Install openssl for Prisma (Alpine 3.19+ uses OpenSSL 3.x)
 RUN apk add --no-cache libc6-compat openssl openssl-dev
